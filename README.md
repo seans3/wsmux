@@ -22,7 +22,7 @@ starting websocket server...localhost:8080
 ...
 ```
 
-Client in another terminal. Type into terminal. <ENTER> sends message, which is echoed.
+Client in another terminal. Type into terminal. `<ENTER>` sends message, which is echoed.
 
 ```
 $ ws-client
@@ -42,3 +42,4 @@ adsfasdfasdf
 4. Change hard-coded `os.stdin` and `fmt.Printf` into generalized `io.Reader` and `io.Writer`.
 5. Add unit tests.
 6. Add `Stream` abstraction on top of websocket connection.
+7. Add sub-protocol version for client/server.

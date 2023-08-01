@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
@@ -18,14 +19,22 @@ var addr = flag.String("addr", "localhost:8080", "address/port of websocket serv
 const (
 	writeWait        = 10 * time.Second
 	closeGracePeriod = 10 * time.Second
+	handshakeTimeout = 45 * time.Second
 )
+
+var dialer = &websocket.Dialer{
+	Proxy:            http.ProxyFromEnvironment,
+	HandshakeTimeout: handshakeTimeout,
+	ReadBufferSize:   32 * 1024,
+	WriteBufferSize:  32 * 1024,
+}
 
 func main() {
 	flag.Parse()
 	fmt.Printf("starting websocket client...%s\n", *addr)
 	// Dial websocket connection.
 	u := url.URL{Scheme: "ws", Host: *addr, Path: "/echo"}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		fmt.Printf("dial: %v", err)
 		os.Exit(1)

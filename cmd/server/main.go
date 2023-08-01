@@ -23,7 +23,11 @@ func main() {
 	fmt.Println("websocket server...finished")
 }
 
-var upgrader = websocket.Upgrader{}
+var upgrader = websocket.Upgrader{
+	Subprotocols:    []string{},
+	ReadBufferSize:  32 * 1024,
+	WriteBufferSize: 32 * 1024,
+}
 
 // echoHandler upgrades passed request to a websocket connection, and reads
 // this connection. Implements http.Handler interface.
