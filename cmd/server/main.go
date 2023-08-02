@@ -56,4 +56,6 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	// Need to cleanup and stop the server.
+	fmt.Println("websocket server handler finished")
 }

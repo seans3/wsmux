@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,6 +26,7 @@ const (
 
 var dialer = &websocket.Dialer{
 	Proxy:            http.ProxyFromEnvironment,
+	Subprotocols:     []string{},
 	HandshakeTimeout: handshakeTimeout,
 	ReadBufferSize:   32 * 1024,
 	WriteBufferSize:  32 * 1024,
@@ -40,6 +43,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close()
+	// Set up handler for interrupt signal
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 	// Create and start reading loop
 	go func() {
 		defer conn.Close()
@@ -53,22 +59,31 @@ func main() {
 			fmt.Printf("%s", message)
 		}
 	}()
-	// Create and run loop to read stdin and write to the websocket connection.
-	s := bufio.NewScanner(bufio.NewReader(os.Stdin))
-	for s.Scan() {
-		conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := conn.WriteMessage(websocket.TextMessage, s.Bytes()); err != nil {
-			conn.Close()
-			break
+	go func() {
+		// Create and run loop to read stdin and write to the websocket connection.
+		s := bufio.NewScanner(bufio.NewReader(os.Stdin))
+		for s.Scan() {
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.TextMessage, s.Bytes()); err != nil {
+				conn.Close()
+				break
+			}
 		}
-	}
-	if s.Err() != nil {
-		fmt.Printf("scan: %s", s.Err())
+		if s.Err() != nil {
+			fmt.Printf("scan: %s", s.Err())
+		}
+	}()
+
+	select {
+	case <-signalCh:
+		fmt.Println("caught interrupt signal--closing")
+		break
 	}
 
+	fmt.Println("sending close to server...")
 	conn.SetWriteDeadline(time.Now().Add(writeWait))
 	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	// time.Sleep(closeGracePeriod)
+	time.Sleep(closeGracePeriod)
 	conn.Close()
 
 	fmt.Println("websocket client...finished")
