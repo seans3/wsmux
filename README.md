@@ -39,5 +39,5 @@ adsfasdfasdf
 3. Refactor common code into `pkg`.
 4. Change hard-coded `os.stdin` and `fmt.Printf` into generalized `io.Reader` and `io.Writer`.
 5. Add unit tests.
-6. Add `Stream` abstraction on top of websocket connection.
+6. Add abstraction for mutiple streams on top of websocket connection.
 7. Add sub-protocol version for client/server.
