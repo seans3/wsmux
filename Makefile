@@ -8,10 +8,13 @@ export PATH := $(MYGOBIN):$(PATH)
 
 .PHONY: build
 build:
-	go build -o bin/ws-server cmd/server/main.go;
-	go build -o bin/ws-client cmd/client/main.go;
-	mv bin/ws-server "$(MYGOBIN)"
-	mv bin/ws-client "$(MYGOBIN)"
+	go build -o bin/ws-server cmd/server/ws-server.go
+	go build -o bin/ws-client cmd/client/ws-client.go
+
+.PHONY: install
+install:
+	go install cmd/server/ws-server.go
+	go install cmd/client/ws-client.go
 
 "$(MYGOBIN)/stringer":
 	go install golang.org/x/tools/cmd/stringer@v0.1.10

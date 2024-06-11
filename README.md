@@ -6,10 +6,8 @@ WebSockets library implmenting multiplexed streams on top of connection.
 
 ```
 $ make build
-go build -o bin/ws-server cmd/server/main.go;
-go build -o bin/ws-client cmd/client/main.go;
-mv bin/ws-server "/usr/local/google/home/seans/go/bin"
-mv bin/ws-client "/usr/local/google/home/seans/go/bin"
+go install cmd/server/ws-server.go
+go install cmd/client/ws-client.go
 ```
 
 #### Running
