@@ -35,10 +35,14 @@ adsfasdfasdf
 #### Design/Interface WebsockerChannels
 
 1. Server - upgrading connection
-  `Upgrader.Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error)`
+  ```
+  Upgrader.Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error)
+  ```
 
 2. Client - request upgrade
-  `Dialer.Dial(ctx context.Context, urlStr string, requestHeader http.Header) (*Conn, *http.Response, error)`
+  ```
+  Dialer.Dial(ctx context.Context, urlStr string, requestHeader http.Header) (*Conn, *http.Response, error)
+  ```
 
 3. Connection
   ```
@@ -60,7 +64,10 @@ adsfasdfasdf
   GetHeaders() (map[string]string)
   ```
 
-?? Where to set parameters such as read/write deadline; ping/pong heartbeat params.
+5. Questions
+
+* Where to set read/write deadline
+* Where to set ping/pong heartbeat params
 
 
 #### TODO
