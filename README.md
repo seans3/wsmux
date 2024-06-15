@@ -32,6 +32,30 @@ adsfasdfasdf
 ...
 ```
 
+#### Design/Interface
+
+1. Server - upgrading connection
+  Upgrader.Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error)
+
+2. Client - request upgrade
+  Dialer.Dial(ctx context.Context, urlStr string, requestHeader http.Header) (*Conn, *http.Response, error)
+
+3. Connection
+  Conn.CreateStream(ChannelID, Headers) (*Channel, error)
+  Conn.RemoveStream(*Channel) (error)
+  Conn.Close()
+  Conn.Subprotocol()
+  Conn.NextReader()
+  Conn.NextWriter()
+
+4. Channel
+  ReadMessage() ([]byte, error)
+  WriteMessage([]byte) (error)
+
+
+?? Where to set parameters such as read/write deadline; ping/pong heartbeat params.
+
+
 #### TODO
 
 1. Neither client nor server is closing cleanly--fix it.
