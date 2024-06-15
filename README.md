@@ -41,22 +41,22 @@ adsfasdfasdf
 
 2. Client - request upgrade
   ```
-  Dialer.Dial(ctx context.Context, urlStr string, requestHeader http.Header) (*Conn, *http.Response, error)
+  Dialer.Dial(ctx context.Context, url string, requestHeader http.Header) (*Conn, *http.Response, error)
   ```
 
 3. Connection
   ```
-  Conn.NextReader()
-  Conn.NextWriter()
+  Conn.NextReader() (io.ReadCloser, error)
+  Conn.NextWriter() (io.WriteCloser, error)
   Conn.Close()
-  Conn.Subprotocol()
+  Conn.Subprotocol() (string)
 
   Conn.SetChannelCreatedHandler(func () (*Channel, error) {})
-  Conn.CreateChannel(ChannelID, Headers) (*Channel, error)
-  Conn.RemoveChannel(*Channel) (error)
+  Conn.CreateChannel(channelID string, headers map[string]string) (*Channel, error)
+  Conn.RemoveChannel(ch *Channel) (error)
   ```
 
-4. Channel
+4. Channel - logical stream of independent data within Connection
   ```
   ReadMessage() ([]byte, error)
   WriteMessage([]byte) (error)
