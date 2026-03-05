@@ -19,7 +19,7 @@ import (
 func TestMultiplex_HalfClose(t *testing.T) {
 	// Setup a test server
 	var upgrader = Upgrader{
-		websocket.Upgrader{
+		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
@@ -37,7 +37,7 @@ func TestMultiplex_HalfClose(t *testing.T) {
 
 	// Client Dials
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatalf("Dial failed: %v", err)

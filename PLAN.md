@@ -35,17 +35,18 @@ To ensure high code quality and maintainability, all contributions must adhere t
 - [/] Implement `WriteMessage` in `Channel` that adds the header and writes to the physical WebSocket via a dedicated writer goroutine.
 
 ### Milestone 3: Channel Lifecycle & EOF Support
-- [ ] Implement `FlagEOF` in `internal/protocol`.
-- [ ] Add `Channel.CloseWrite()` to support half-close (EOF).
-- [ ] Update `Conn.handleFrame` to support graceful EOF without immediate channel destruction.
-- [ ] Implement `SetChannelCreatedHandler` (inbound).
-- [ ] Add `io.EOF` signaling to `Channel.ReadMessage()`.
-- [ ] Ensure `Conn` only removes channels from the map after bi-directional closure or a `FlagClose` reset.
+- [x] Implement `FlagEOF` in `internal/protocol`.
+- [x] Add `Channel.CloseWrite()` to support half-close (EOF).
+- [x] Update `Conn.handleFrame` to support graceful EOF without immediate channel destruction.
+- [x] Implement `SetChannelCreatedHandler` (inbound).
+- [x] Add `io.EOF` signaling to `Channel.ReadMessage()`.
+- [x] Ensure `Conn` only removes channels from the map after bi-directional closure or a `FlagClose` reset.
 
 ### Milestone 4: Connection Reliability & Heartbeats
-- [ ] Integrate Ping/Pong heartbeat mechanism into the `multiplex.Conn` loop.
-- [ ] Add support for read/write deadlines.
-- [ ] Ensure clean shutdown: send `Close` messages and wait for acknowledgments.
+- [ ] Add `PingInterval` and `ReadTimeout` configuration to `Conn`.
+- [ ] Implement periodic `Ping` sending in a dedicated goroutine.
+- [ ] Implement `Pong` handling and read deadline refreshing.
+- [ ] Ensure clean physical shutdown with WebSocket `CloseMessage` handshake.
 ### Milestone 5: Resilience & Advanced Testing
 - [ ] Implement a `FaultInjectedConn` wrapper for `net.Conn` to simulate:
     - Random message drops.

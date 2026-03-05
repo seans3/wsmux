@@ -53,7 +53,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 	}
 
 	upgrader := Upgrader{
-		websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
 	serverConnCh := make(chan *Conn, 1)
@@ -67,7 +67,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 
 func TestMultiplex_ActualChaos(t *testing.T) {
 	upgrader := Upgrader{
-		websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

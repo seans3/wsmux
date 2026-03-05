@@ -5,17 +5,31 @@ package multiplex
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/seans3/websockets/pkg/multiplex/internal/protocol"
 )
 
+const (
+	defaultPingInterval = 30 * time.Second
+	defaultReadTimeout  = 60 * time.Second
+	defaultWriteTimeout = 10 * time.Second
+)
+
+var (
+	ErrChannelIDInUse = errors.New("multiplex: channel ID already in use")
+)
+
 // Upgrader wraps gorilla.Upgrader to support multiplexed connections.
 type Upgrader struct {
 	websocket.Upgrader
+	PingInterval time.Duration
+	ReadTimeout  time.Duration
 }
 
 // Upgrade upgrades the HTTP server connection to the multiplexed protocol.
@@ -25,12 +39,14 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	if err != nil {
 		return nil, err
 	}
-	return NewConn(c), nil
+	return NewConnWithConfig(c, u.PingInterval, u.ReadTimeout), nil
 }
 
 // Dialer wraps gorilla.Dialer to support multiplexed connections.
 type Dialer struct {
 	websocket.Dialer
+	PingInterval time.Duration
+	ReadTimeout  time.Duration
 }
 
 // Dial creates a new multiplexed connection to the specified URL.
@@ -43,7 +59,7 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 	if err != nil {
 		return nil, resp, err
 	}
-	return NewConn(c), resp, nil
+	return NewConnWithConfig(c, d.PingInterval, d.ReadTimeout), resp, nil
 }
 
 // writeMsg represents a message to be written to the physical websocket.
@@ -61,20 +77,45 @@ type Conn struct {
 	
 	onChannelCreated func(*Channel) error
 	
+	pingInterval time.Duration
+	readTimeout  time.Duration
+
 	// done is closed when the connection is terminated
 	done chan struct{}
 }
 
-// NewConn initializes a new multiplexed connection.
+// NewConn initializes a new multiplexed connection with default settings.
 func NewConn(ws *websocket.Conn) *Conn {
-	c := &Conn{
-		ws:       ws,
-		writeCh:  make(chan writeMsg, 256),
-		channels: make(map[uint64]*Channel),
-		done:     make(chan struct{}),
+	return NewConnWithConfig(ws, 0, 0)
+}
+
+// NewConnWithConfig initializes a new multiplexed connection with specific timeouts.
+func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Duration) *Conn {
+	if pingInterval == 0 {
+		pingInterval = defaultPingInterval
 	}
+	if readTimeout == 0 {
+		readTimeout = defaultReadTimeout
+	}
+
+	c := &Conn{
+		ws:           ws,
+		writeCh:      make(chan writeMsg, 256),
+		channels:     make(map[uint64]*Channel),
+		pingInterval: pingInterval,
+		readTimeout:  readTimeout,
+		done:         make(chan struct{}),
+	}
+	
+	c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+	c.ws.SetPongHandler(func(string) error {
+		c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+		return nil
+	})
+
 	go c.writeLoop()
 	go c.readLoop()
+	go c.pingLoop()
 	return c
 }
 
@@ -89,18 +130,28 @@ func (c *Conn) Done() <-chan struct{} {
 }
 
 func (c *Conn) writeLoop() {
+	defer c.ws.Close()
 	for {
 		select {
 		case msg, ok := <-c.writeCh:
 			if !ok {
 				return
 			}
+			c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 			if err := c.ws.WriteMessage(msg.messageType, msg.data); err != nil {
-				c.Close()
 				return
 			}
 		case <-c.done:
-			return
+			// Drain remaining messages briefly
+			for {
+				select {
+				case msg := <-c.writeCh:
+					c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
+					_ = c.ws.WriteMessage(msg.messageType, msg.data)
+				default:
+					return
+				}
+			}
 		}
 	}
 }
@@ -112,10 +163,11 @@ func (c *Conn) readLoop() {
 		if err != nil {
 			return
 		}
-		
+
+		// Refresh read deadline on any activity
+		c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+
 		if messageType != websocket.BinaryMessage {
-			// In our multiplexed protocol, data frames should be binary.
-			// We might handle other types (like Close/Ping/Pong) specifically if gorilla doesn't.
 			continue
 		}
 
@@ -125,6 +177,23 @@ func (c *Conn) readLoop() {
 		}
 
 		c.handleFrame(frame)
+	}
+}
+
+func (c *Conn) pingLoop() {
+	ticker := time.NewTicker(c.pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			select {
+			case c.writeCh <- writeMsg{messageType: websocket.PingMessage}:
+			case <-c.done:
+				return
+			}
+		case <-c.done:
+			return
+		}
 	}
 }
 
@@ -171,8 +240,17 @@ func (c *Conn) Close() error {
 	case <-c.done:
 		return nil
 	default:
+		// Send WebSocket CloseMessage gracefully via the write loop
+		select {
+		case c.writeCh <- writeMsg{
+			messageType: websocket.CloseMessage,
+			data:        websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		}:
+		default:
+		}
+		// Close done to stop ping loop and write loop
 		close(c.done)
-		return c.ws.Close()
+		return nil
 	}
 }
 
@@ -196,7 +274,7 @@ func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 	defer c.mu.Unlock()
 	
 	if _, ok := c.channels[id]; ok {
-		return nil, nil // Or return error already exists
+		return nil, ErrChannelIDInUse
 	}
 
 	ch := &Channel{

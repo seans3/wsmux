@@ -19,7 +19,7 @@ import (
 func TestMultiplex_Handshake(t *testing.T) {
 	t.Run("Successful Negotiation", func(t *testing.T) {
 		var upgrader = Upgrader{
-			websocket.Upgrader{
+			Upgrader: websocket.Upgrader{
 				CheckOrigin: func(r *http.Request) bool { return true },
 			},
 		}
@@ -34,7 +34,7 @@ func TestMultiplex_Handshake(t *testing.T) {
 		defer s.Close()
 
 		u := "ws" + strings.TrimPrefix(s.URL, "http")
-		dialer := Dialer{websocket.Dialer{}}
+		dialer := Dialer{Dialer: websocket.Dialer{}}
 		clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 		if err != nil {
 			t.Fatalf("Dial failed: %v", err)
@@ -47,7 +47,7 @@ func TestMultiplex_Handshake(t *testing.T) {
 	})
 
 	t.Run("Upgrade Failure - No Websocket", func(t *testing.T) {
-		var upgrader = Upgrader{websocket.Upgrader{}}
+		var upgrader = Upgrader{Upgrader: websocket.Upgrader{}}
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := upgrader.Upgrade(w, r, nil)
 			if err == nil {
@@ -66,7 +66,7 @@ func TestMultiplex_Handshake(t *testing.T) {
 	})
 
 	t.Run("Dial Failure - Connection Refused", func(t *testing.T) {
-		dialer := Dialer{websocket.Dialer{}}
+		dialer := Dialer{Dialer: websocket.Dialer{}}
 		_, _, err := dialer.Dial(context.Background(), "ws://localhost:1", nil)
 		if err == nil {
 			t.Error("Expected error on refused connection, got nil")
@@ -77,7 +77,7 @@ func TestMultiplex_Handshake(t *testing.T) {
 func TestMultiplex_Basic(t *testing.T) {
 	// Setup a test server
 	var upgrader = Upgrader{
-		websocket.Upgrader{
+		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
@@ -95,7 +95,7 @@ func TestMultiplex_Basic(t *testing.T) {
 
 	// Client Dials
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatalf("Dial failed: %v", err)
