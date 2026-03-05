@@ -23,7 +23,7 @@ install:
 	go install github.com/google/addlicense@v1.1.0
 
 "$(MYGOBIN)/golangci-lint":
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.50.1
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 "$(MYGOBIN)/ginkgo":
 	go install github.com/onsi/ginkgo/v2/ginkgo@v2.5.1

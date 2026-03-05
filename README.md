@@ -1,81 +1,83 @@
-# WebSockets
+# WebSockets Multiplexing Library
 
-WebSockets library implmenting multiplexed streams on top of connection.
+A Go library that extends [gorilla/websocket](https://github.com/gorilla/websocket) to provide a robust multiplexing/demultiplexing interface. This allows multiple independent, logical streams (Channels) to coexist over a single persistent WebSocket connection.
 
-#### Building
+## Features
 
-```
-$ make build
-go install cmd/server/ws-server.go
-go install cmd/client/ws-client.go
-```
+- **Multiplexing:** Run multiple logical streams over one physical connection.
+- **Channel Isolation:** Independent headers and data flow for each channel.
+- **Familiar API:** Built on top of standard Go `io` interfaces and common WebSocket patterns.
+- **Clean Lifecycle:** Managed connection upgrading and dialing with built-in channel handlers.
 
-#### Running
+## Project Status
 
-Server in one terminal
+This project is currently under active development. See [PLAN.md](PLAN.md) for our implementation roadmap and milestones.
 
-```
-$ ws-server
-starting websocket server...localhost:8080
-...
-```
+## Building
 
-Client in another terminal. Type into terminal. `<ENTER>` sends message, which is echoed.
+To build the example server and client:
 
-```
-$ ws-client
-starting websocket client...localhost:8080
-adsfasdfasdf
-adsfasdfasdf
-23r1cdf
-23r1cdf
-...
+```bash
+make build
 ```
 
-#### Design/Interface WebsockerChannels
+This installs `ws-server` and `ws-client` to your `$GOPATH/bin`.
 
-1. Server - upgrading connection
-  ```
-  Upgrader.Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error)
-  ```
+## Running the Examples
 
-2. Client - request upgrade
-  ```
-  Dialer.Dial(ctx context.Context, url string, requestHeader http.Header) (*Conn, *http.Response, error)
-  ```
+### 1. Start the Server
+```bash
+ws-server -addr localhost:8080
+```
 
-3. Connection
-  ```
-  Conn.NextReader() (io.ReadCloser, error)
-  Conn.NextWriter() (io.WriteCloser, error)
-  Conn.Close()
-  Conn.Subprotocol() (string)
+### 2. Start the Client
+```bash
+ws-client -addr localhost:8080
+```
+Type messages into the client terminal. Each message is sent over the multiplexed connection and echoed back by the server.
 
-  Conn.SetChannelCreatedHandler(func () (*Channel, error) {})
-  Conn.CreateChannel(channelID string, headers map[string]string) (*Channel, error)
-  Conn.RemoveChannel(ch *Channel) (error)
-  ```
+## API Preview
 
-4. Channel - logical stream of independent data within Connection
-  ```
-  ReadMessage() ([]byte, error)
-  WriteMessage([]byte) (error)
-  GetChannelID() (string)
-  GetHeaders() (map[string]string)
-  ```
+### Server Upgrader
+```go
+upgrader := multiplex.Upgrader{...}
+conn, err := upgrader.Upgrade(w, r, responseHeader)
+```
 
-5. Questions
+### Client Dialer
+```go
+dialer := multiplex.Dialer{...}
+conn, _, err := dialer.Dial(ctx, url, requestHeader)
+```
 
-* Where to set read/write deadline
-* Where to set ping/pong heartbeat params
+### Connection Management
+```go
+// Create a new logical channel
+channel, err := conn.CreateChannel("chat-room-1", map[string]string{"user": "alice"})
 
+// Handle incoming channels from the remote peer
+conn.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+    fmt.Printf("New channel created: %s\n", ch.GetChannelID())
+    return nil
+})
+```
 
-#### TODO
+### Channel Operations
+```go
+// Channels implement message-based Read/Write
+err := channel.WriteMessage([]byte("Hello World"))
+msg, err := channel.ReadMessage()
+```
 
-1. Neither client nor server is closing cleanly--fix it.
-2. Add ping/pong heartbeat into protocol.
-3. Refactor common code into `pkg`.
-4. Change hard-coded `os.stdin` and `fmt.Printf` into generalized `io.Reader` and `io.Writer`.
-5. Add unit tests.
-6. Add abstraction for mutiple streams on top of websocket connection.
-7. Add sub-protocol version for client/server.
+## Documentation
+
+For a detailed implementation plan and upcoming features, refer to [PLAN.md](PLAN.md).
+
+## TODO
+
+1. Fix connection teardown (client/server clean close).
+2. Implement Ping/Pong heartbeats.
+3. Refactor core logic into `/pkg`.
+4. Decouple examples from `os.Stdin` / `fmt.Printf`.
+5. Add comprehensive unit tests.
+6. Implement sub-protocol version negotiation.
