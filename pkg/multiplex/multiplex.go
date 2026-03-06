@@ -107,9 +107,9 @@ func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Durati
 		done:         make(chan struct{}),
 	}
 	
-	c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+	_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
 	c.ws.SetPongHandler(func(string) error {
-		c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+		_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
 		return nil
 	})
 
@@ -137,7 +137,7 @@ func (c *Conn) writeLoop() {
 			if !ok {
 				return
 			}
-			c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
+			_ = c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 			if err := c.ws.WriteMessage(msg.messageType, msg.data); err != nil {
 				return
 			}
@@ -146,7 +146,7 @@ func (c *Conn) writeLoop() {
 			for {
 				select {
 				case msg := <-c.writeCh:
-					c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
+					_ = c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 					_ = c.ws.WriteMessage(msg.messageType, msg.data)
 				default:
 					return
@@ -165,7 +165,7 @@ func (c *Conn) readLoop() {
 		}
 
 		// Refresh read deadline on any activity
-		c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
+		_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
 
 		if messageType != websocket.BinaryMessage {
 			continue
