@@ -20,6 +20,8 @@ To ensure high code quality and maintainability, all contributions must adhere t
 5.  **Concurrency Safety:** All components must be thread-safe. Use the race detector (`go test -race`) during validation.
 6.  **Public Documentation:** All exported types, functions, and methods must have descriptive comments.
 7.  **Surgical Changes:** Keep PRs/CLs focused. Avoid unrelated refactoring or "cleanups" in the same change as a feature or fix.
+8.  **Fault Tolerance:** Library must not panic on malformed network input. 
+9.  **Fuzzing:** Protocol parsing logic must have 100% coverage via `go test -fuzz`.
 
 ## Milestones
 
@@ -30,66 +32,58 @@ To ensure high code quality and maintainability, all contributions must adhere t
 - [x] Implement basic `Upgrade` and `Dial` wrappers.
 
 ### Milestone 2: Multiplexing Protocol (The "Wire" Format)
-- [x] Define the frame header format (Fixed-size uint32 ID + Flag).
-- [/] Implement the message router (demuxer) in `Conn` that reads from the physical WebSocket and dispatches messages to the correct `Channel`.
-- [/] Implement `WriteMessage` in `Channel` that adds the header and writes to the physical WebSocket via a dedicated writer goroutine.
+- [x] Define the frame header format (Variable-length Varint ID + Flag).
+- [x] Implement the message router (demuxer) in `Conn`.
+- [x] Implement thread-safe `WriteMessage` via a dedicated writer goroutine.
 
 ### Milestone 3: Channel Lifecycle & EOF Support
-- [x] Implement `FlagEOF` in `internal/protocol`.
-- [x] Add `Channel.CloseWrite()` to support half-close (EOF).
-- [x] Update `Conn.handleFrame` to support graceful EOF without immediate channel destruction.
-- [x] Implement `SetChannelCreatedHandler` (inbound).
+- [x] Implement `FlagEOF` for half-close support.
+- [x] Add `Channel.CloseWrite()` to signal EOF.
+- [x] Implement bi-directional closure state machine.
 - [x] Add `io.EOF` signaling to `Channel.ReadMessage()`.
-- [x] Ensure `Conn` only removes channels from the map after bi-directional closure or a `FlagClose` reset.
 
 ### Milestone 4: Connection Reliability & Heartbeats
-- [ ] Add `PingInterval` and `ReadTimeout` configuration to `Conn`.
-- [ ] Implement periodic `Ping` sending in a dedicated goroutine.
-- [ ] Implement `Pong` handling and read deadline refreshing.
-- [ ] Ensure clean physical shutdown with WebSocket `CloseMessage` handshake.
-### Milestone 5: Resilience & Advanced Testing
-- [ ] Implement a `FaultInjectedConn` wrapper for `net.Conn` to simulate:
-    - Random message drops.
-    - Latency spikes.
-    - Sudden connection resets.
-- [ ] Add Go Fuzz targets for `protocol.Decode` to identify panic-inducing malformed frames.
-- [ ] Implement "Stress/Concurrency" tests: 1000+ simultaneous channels with random data sizes.
-- [ ] Add integration tests for "Dangling Channels": verify memory is reclaimed if a peer disappears without `FlagClose`.
-- [ ] Replace hard-coded `os.Stdin`/`fmt.Printf` in examples with `io.Reader`/`io.Writer`.
+- [x] Add `PingInterval` and `ReadTimeout` configuration.
+- [x] Implement periodic `Ping` sending.
+- [x] Implement `Pong` handling and read deadline refreshing.
+- [x] Ensure clean shutdown with WebSocket `CloseMessage` handshake.
 
-## Development Principles
-...
-8. **Fault Tolerance:** Library must not panic on malformed network input. 
-9. **Fuzzing:** Protocol parsing logic must have 100% coverage via `go test -fuzz`.
+### Milestone 5: Resilience & Idiomatic API
+- [x] Add Go Fuzz targets for `protocol.Decode`.
+- [x] Implement a `FaultInjectedConn` for chaos testing.
+- [ ] Implement **`io.Reader` and `io.Writer` interfaces** for `Channel`.
+    - Allows seamless integration with `io.Copy`, `bufio`, etc.
+- [ ] Add integration tests for "Dangling Channels" cleanup (when physical connection drops).
 
 ### Milestone 6: Advanced Protocol Features
-- [ ] Implement sub-protocol version negotiation.
+- [ ] Implement sub-protocol version negotiation improvements.
 - [ ] Add support for flow control (optional/future).
+
+### Milestone 7: Compelling Example Application
+- [ ] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
+    - [ ] Maps `stdin`, `stdout`, and `stderr` to independent logical channels.
+    - [ ] Demonstrates `CloseWrite()` signaling EOF to a remote shell (e.g. `bash`).
+    - [ ] Uses `io.Copy` for idiomatic data piping.
 
 ---
 
-## Technical Considerations & Questions
+## Technical Considerations
 
 ### 1. Framing
 **Decision:** Use a variable-length integer (Varint) for `ChannelID`.
-*Rationale:* Space-efficient for low channel IDs (1 byte for ID < 128) while supporting IDs up to 64-bit if needed.
+*Rationale:* Space-efficient for low channel IDs while supporting IDs up to 64-bit.
 *Protocol Format (per frame):*
 - `ChannelID`: Varint (Base-128)
-- `Flag`: 1 byte (e.g., `0x01` Data, `0x02` Create, `0x03` Close)
+- `Flag`: 1 byte (0x01 Data, 0x02 Create, 0x03 Close, 0x04 EOF)
 - `Payload`: Remaining data
 
-### 2. Handshake & Versioning
-**Decision:** Use the standard `Sec-WebSocket-Protocol` header during the `Upgrade` and `Dial` phases to negotiate the multiplexing version (e.g., `multiplex.v1.0`).
-
-### 3. Concurrency (Writes)
+### 2. Concurrency (Writes)
 **Decision:** Use a dedicated writer goroutine with a channel-based dispatch.
-*Rationale:* 
-- **Serialization:** Ensures strictly serial access to the underlying `gorilla/websocket` connection as required.
-- **Non-blocking:** `Channel.WriteMessage` becomes a non-blocking (or at least less-blocking) operation by sending to the dispatch channel.
-- **Performance:** While a `sync.Mutex` has lower overhead for low-contention scenarios, a dedicated writer goroutine scales better under high contention and allows for future optimizations like write-coalescing or message prioritization. It also simplifies connection teardown by allowing the writer to handle the `CloseMessage` as just another queued task.
 
-### 4. Buffering
-**Decision:** Each `Channel` will have an internal channel (`chan []byte`) to buffer incoming messages from the demuxer. `Channel.ReadMessage()` will pull from this internal channel.
+### 3. Buffering
+**Decision:** Each `Channel` has an internal `chan []byte` buffer. `ReadMessage` pulls from this.
 
-### 4. Error Propagation
-**Decision:** If the physical `Conn` fails, all associated `Channels` must be closed and their pending `ReadMessage` calls should return an error.
+### 4. EOF vs Close
+**Decision:** 
+- `CloseWrite()`: Locally done writing. Sends `FlagEOF`. Read still open.
+- `Close()`: Immediate abort. Sends `FlagClose`. Both directions closed.

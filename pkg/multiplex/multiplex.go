@@ -248,7 +248,7 @@ func (c *Conn) Close() error {
 		}:
 		default:
 		}
-		// Close done to stop ping loop and write loop
+		// Close done to stop ping loop and signal write loop to drain
 		close(c.done)
 		return nil
 	}
@@ -304,8 +304,44 @@ type Channel struct {
 	localClosed  bool
 	remoteClosed bool
 	
+	remainingBuf []byte // To store overflow from Read() calls
+	
 	closeOnce sync.Once // specifically for closing readCh
 	abortOnce sync.Once // specifically for sending FlagClose and aborting
+}
+
+// Read implements io.Reader.
+func (ch *Channel) Read(p []byte) (n int, err error) {
+	ch.mu.Lock()
+	if len(ch.remainingBuf) > 0 {
+		n = copy(p, ch.remainingBuf)
+		ch.remainingBuf = ch.remainingBuf[n:]
+		ch.mu.Unlock()
+		return n, nil
+	}
+	ch.mu.Unlock()
+
+	data, err := ch.ReadMessage()
+	if err != nil {
+		return 0, err
+	}
+
+	n = copy(p, data)
+	if n < len(data) {
+		ch.mu.Lock()
+		ch.remainingBuf = data[n:]
+		ch.mu.Unlock()
+	}
+	return n, nil
+}
+
+// Write implements io.Writer.
+func (ch *Channel) Write(p []byte) (n int, err error) {
+	err = ch.WriteMessage(p)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // WriteMessage sends a message over the logical channel.
