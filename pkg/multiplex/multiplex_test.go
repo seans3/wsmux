@@ -1,7 +1,7 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file contains core functional tests for the multiplexing library, 
+// This file contains core functional tests for the multiplexing library,
 // including handshake negotiation, channel creation, and basic data transfer.
 package multiplex
 

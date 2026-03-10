@@ -1,8 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file verifies that logical channels correctly implement the standard 
-// io.Reader and io.Writer interfaces, ensuring compatibility with Go's 
+// This file verifies that logical channels correctly implement the standard
+// io.Reader and io.Writer interfaces, ensuring compatibility with Go's
 // standard library tools like io.Copy and bufio.
 package multiplex
 

@@ -24,8 +24,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// TestStress_Echo verifies that multiple logical channels can independently 
-// send and receive large amounts of data concurrently over a single physical 
+// TestStress_Echo verifies that multiple logical channels can independently
+// send and receive large amounts of data concurrently over a single physical
 // connection. It specifically tests:
 // 1. Thread-safe multiplexing of data frames.
 // 2. Variable chunk sizes to stress framing logic.
@@ -44,7 +44,7 @@ func TestStress_Echo(t *testing.T) {
 		if err != nil {
 			return
 		}
-		
+
 		// For every new channel created by the client, start an echo goroutine.
 		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			go func() {
@@ -56,7 +56,7 @@ func TestStress_Echo(t *testing.T) {
 			}()
 			return nil
 		})
-		
+
 		serverConnCh <- c
 	}))
 	defer s.Close()
@@ -106,7 +106,7 @@ func TestStress_Echo(t *testing.T) {
 				errCh <- err
 			}()
 
-			// Write random data in random-sized chunks to stress the internal 
+			// Write random data in random-sized chunks to stress the internal
 			// buffer and framing logic.
 			written := 0
 			for written < dataSize {
@@ -122,7 +122,7 @@ func TestStress_Echo(t *testing.T) {
 				written += n
 			}
 
-			// Signal half-close (EOF) to the server. The client is done sending, 
+			// Signal half-close (EOF) to the server. The client is done sending,
 			// but still needs to receive the remaining echoed data.
 			if err := ch.CloseWrite(); err != nil {
 				t.Errorf("CloseWrite error on channel %d: %v", id, err)
@@ -150,11 +150,11 @@ func TestStress_Echo(t *testing.T) {
 	wg.Wait()
 }
 
-// TestStress_CrossChannel verifies that data can be relayed between different 
-// logical channels. This simulates a "proxy" or "control plane" pattern where 
+// TestStress_CrossChannel verifies that data can be relayed between different
+// logical channels. This simulates a "proxy" or "control plane" pattern where
 // one channel acts as an input and another as an output.
 func TestStress_CrossChannel(t *testing.T) {
-	// Setup a server that relays data between pairs of channels: 
+	// Setup a server that relays data between pairs of channels:
 	// Even ID (Inbound) -> (Even ID + 1) (Outbound).
 	upgrader := Upgrader{
 		Upgrader: websocket.Upgrader{
@@ -177,7 +177,7 @@ func TestStress_CrossChannel(t *testing.T) {
 			id := ch.GetChannelID()
 			mu.Lock()
 			channels[id] = ch
-			
+
 			if id%2 == 0 {
 				// We just received the "Even" channel. Check if the "Odd" partner exists.
 				if partner, ok := channels[id+1]; ok {
@@ -192,7 +192,7 @@ func TestStress_CrossChannel(t *testing.T) {
 			mu.Unlock()
 			return nil
 		})
-		
+
 		serverConnCh <- c
 	}))
 	defer s.Close()
@@ -218,7 +218,7 @@ func TestStress_CrossChannel(t *testing.T) {
 	for i := 0; i < numPairs; i++ {
 		go func(pairID int) {
 			defer wg.Done()
-			
+
 			idIn := uint64(pairID * 2)
 			idOut := uint64(pairID*2 + 1)
 
@@ -254,7 +254,7 @@ func TestStress_CrossChannel(t *testing.T) {
 				t.Errorf("Write error on chIn %d: %v", idIn, err)
 				return
 			}
-			
+
 			// Half-close Inbound to signal that no more data is coming.
 			// This should trigger the server relay to also CloseWrite on chOut.
 			if err := chIn.CloseWrite(); err != nil {
@@ -291,7 +291,7 @@ func relay(in, out *Channel) {
 }
 
 // TestStress_RapidLifecycle stresses the internal channel lookup table (demuxer)
-// by rapidly opening and immediately closing many channels. This ensures 
+// by rapidly opening and immediately closing many channels. This ensures
 // that there are no race conditions in channel registration or cleanup.
 func TestStress_RapidLifecycle(t *testing.T) {
 	upgrader := Upgrader{
@@ -332,7 +332,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// Introduce a small, random delay before client-side close to 
+			// Introduce a small, random delay before client-side close to
 			// interleave create/close frames.
 			time.Sleep(time.Duration(id%10) * time.Millisecond)
 			_ = ch.Close()
@@ -342,9 +342,9 @@ func TestStress_RapidLifecycle(t *testing.T) {
 	wg.Wait()
 }
 
-// TestStress_ParallelConns verifies that the library handles multiple concurrent 
-// physical connections, each managing multiple logical channels. This ensures 
-// that global state (if any) is correctly isolated and that the library 
+// TestStress_ParallelConns verifies that the library handles multiple concurrent
+// physical connections, each managing multiple logical channels. This ensures
+// that global state (if any) is correctly isolated and that the library
 // scales with connection count.
 func TestStress_ParallelConns(t *testing.T) {
 	upgrader := Upgrader{
@@ -375,7 +375,7 @@ func TestStress_ParallelConns(t *testing.T) {
 
 	const numConns = 5
 	const chsPerConn = 10
-	
+
 	var wg sync.WaitGroup
 	wg.Add(numConns)
 
@@ -398,14 +398,14 @@ func TestStress_ParallelConns(t *testing.T) {
 					if err != nil {
 						return
 					}
-					
+
 					// Simple request-response check.
 					data := []byte(fmt.Sprintf("data-from-conn-%d-ch-%d", connID, chID))
 					if _, err := ch.Write(data); err != nil {
 						return
 					}
 					_ = ch.CloseWrite()
-					
+
 					res, _ := io.ReadAll(ch)
 					if !bytes.Equal(res, data) {
 						t.Errorf("Mismatch on conn %d ch %d", connID, chID)

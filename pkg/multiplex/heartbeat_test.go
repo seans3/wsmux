@@ -1,8 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file contains tests for the WebSocket heartbeat mechanism (Ping/Pong) 
-// and read/write deadlines, ensuring that stale or broken connections are 
+// This file contains tests for the WebSocket heartbeat mechanism (Ping/Pong)
+// and read/write deadlines, ensuring that stale or broken connections are
 // detected and closed.
 package multiplex
 
@@ -35,14 +35,14 @@ func TestMultiplex_ReadTimeout(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	
+
 	// Dial with a very short read timeout and NO pings
 	dialer := Dialer{
 		Dialer:       websocket.Dialer{},
 		PingInterval: 10 * time.Hour, // Effectively no pings
 		ReadTimeout:  100 * time.Millisecond,
 	}
-	
+
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -76,14 +76,14 @@ func TestMultiplex_Heartbeat(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	
+
 	// Dial with short read timeout and EVEN SHORTER ping interval
 	dialer := Dialer{
 		Dialer:       websocket.Dialer{},
 		PingInterval: 50 * time.Millisecond,
 		ReadTimeout:  200 * time.Millisecond,
 	}
-	
+
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)

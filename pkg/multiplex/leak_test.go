@@ -3,8 +3,8 @@
 
 //go:build long
 
-// This file contains resource leak analysis tests. It ensures that goroutines 
-// and other resources are correctly reclaimed after connections and logical 
+// This file contains resource leak analysis tests. It ensures that goroutines
+// and other resources are correctly reclaimed after connections and logical
 // channels are closed, preventing memory exhaustion in long-running processes.
 package multiplex
 

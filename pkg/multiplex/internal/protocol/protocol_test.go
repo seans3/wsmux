@@ -1,7 +1,7 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file contains unit tests and fuzzing targets for the binary 
+// This file contains unit tests and fuzzing targets for the binary
 // protocol framing, encoding, and decoding logic.
 package protocol
 
@@ -58,11 +58,11 @@ func TestFrame_EncodeDecode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			encoded := tt.frame.Encode()
 			decoded, err := Decode(encoded)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Decode() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if err == nil {
 				if decoded.ChannelID != tt.frame.ChannelID {
 					t.Errorf("ChannelID = %v, want %v", decoded.ChannelID, tt.frame.ChannelID)
@@ -114,7 +114,7 @@ func FuzzDecode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		
+
 		// If decode succeeds, re-encoding should be stable
 		_ = frame.Encode()
 	})

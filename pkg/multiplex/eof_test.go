@@ -1,8 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file verifies the half-close (EOF) and full-close state machine for 
-// logical channels, ensuring that data can continue to be read after the 
+// This file verifies the half-close (EOF) and full-close state machine for
+// logical channels, ensuring that data can continue to be read after the
 // local side has finished writing.
 package multiplex
 
@@ -102,7 +102,7 @@ func TestMultiplex_HalfClose(t *testing.T) {
 
 	// 7. Verify channels are removed from Conn maps
 	time.Sleep(100 * time.Millisecond) // Give a moment for cleanup
-	
+
 	clientConn.mu.RLock()
 	if len(clientConn.channels) != 0 {
 		t.Errorf("Expected 0 channels in client, got %d", len(clientConn.channels))

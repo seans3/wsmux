@@ -3,9 +3,9 @@
 
 //go:build long
 
-// This file contains tests to verify connection-level backpressure and 
-// Head-of-Line (HoL) blocking behavior. It serves to document current 
-// limitations and ensure consistent behavior until more advanced per-channel 
+// This file contains tests to verify connection-level backpressure and
+// Head-of-Line (HoL) blocking behavior. It serves to document current
+// limitations and ensure consistent behavior until more advanced per-channel
 // flow control is implemented.
 package multiplex
 
@@ -35,7 +35,7 @@ func TestVerification_HoLBlocking(t *testing.T) {
 		if err != nil {
 			return
 		}
-		
+
 		// The server will just keep writing to both channels as fast as possible
 		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			go func() {
@@ -104,8 +104,8 @@ func TestVerification_HoLBlocking(t *testing.T) {
 	// If HoL blocking is present, fastReadCount will be very small (close to 64 + 1)
 	// because the physical connection's readLoop is blocked by the slow channel's enqueueRead.
 	// 64 is the internal readCh buffer size.
-	if fastReadCount > 500 { 
-		// 500 is a safe upper bound; with 1024 byte messages over localhost, 
+	if fastReadCount > 500 {
+		// 500 is a safe upper bound; with 1024 byte messages over localhost,
 		// it would be thousands if NOT blocked.
 		t.Errorf("Fast reader was NOT blocked by slow reader. Count: %d. This suggests HoL blocking is gone?", fastReadCount)
 	} else {

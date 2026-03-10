@@ -57,7 +57,7 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	
+
 	dCopy := d.Dialer
 	dCopy.Subprotocols = append([]string(nil), d.Subprotocols...)
 	dCopy.Subprotocols = append(dCopy.Subprotocols, protocol.ProtocolVersion)
@@ -81,9 +81,9 @@ type Conn struct {
 	writeCh  chan writeMsg
 	channels map[uint64]*Channel
 	mu       sync.RWMutex
-	
+
 	onChannelCreated func(*Channel) error
-	
+
 	pingInterval time.Duration
 	readTimeout  time.Duration
 
@@ -113,7 +113,7 @@ func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Durati
 		readTimeout:  readTimeout,
 		done:         make(chan struct{}),
 	}
-	
+
 	_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
 	c.ws.SetPongHandler(func(string) error {
 		_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
@@ -279,7 +279,7 @@ func (c *Conn) SetChannelCreatedHandler(h func(*Channel) error) {
 func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if _, ok := c.channels[id]; ok {
 		return nil, ErrChannelIDInUse
 	}
@@ -306,13 +306,13 @@ type Channel struct {
 	id     uint64
 	conn   *Conn
 	readCh chan []byte
-	
+
 	mu           sync.Mutex
 	localClosed  bool
 	remoteClosed bool
-	
+
 	remainingBuf []byte // To store overflow from Read() calls
-	
+
 	closeOnce sync.Once // specifically for closing readCh
 	abortOnce sync.Once // specifically for sending FlagClose and aborting
 }
@@ -365,7 +365,7 @@ func (ch *Channel) WriteMessage(data []byte) error {
 		Flag:      protocol.FlagData,
 		Payload:   data,
 	}
-	
+
 	select {
 	case ch.conn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: f.Encode()}:
 		return nil
@@ -403,7 +403,7 @@ func (ch *Channel) CloseWrite() error {
 		ChannelID: ch.id,
 		Flag:      protocol.FlagEOF,
 	}
-	
+
 	select {
 	case ch.conn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: f.Encode()}:
 		ch.maybeCleanup()
@@ -434,7 +434,7 @@ func (ch *Channel) abort() {
 	ch.localClosed = true
 	ch.remoteClosed = true
 	ch.mu.Unlock()
-	
+
 	ch.closeReadChannel()
 	ch.conn.removeChannel(ch.id)
 }
@@ -443,7 +443,7 @@ func (ch *Channel) markRemoteClosed() {
 	ch.mu.Lock()
 	ch.remoteClosed = true
 	ch.mu.Unlock()
-	
+
 	ch.closeReadChannel()
 	ch.maybeCleanup()
 }
@@ -458,7 +458,7 @@ func (ch *Channel) maybeCleanup() {
 	ch.mu.Lock()
 	done := ch.localClosed && ch.remoteClosed
 	ch.mu.Unlock()
-	
+
 	if done {
 		ch.conn.removeChannel(ch.id)
 	}

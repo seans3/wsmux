@@ -1,8 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// This file contains "chaos" tests that use a fault-injected network 
-// connection to simulate network instability, drops, and latency, 
+// This file contains "chaos" tests that use a fault-injected network
+// connection to simulate network instability, drops, and latency,
 // ensuring the multiplexer can handle ungraceful disconnects.
 package multiplex
 
@@ -25,8 +25,8 @@ import (
 // FaultInjectedConn wraps a net.Conn to simulate network issues.
 type FaultInjectedConn struct {
 	net.Conn
-	dropRate   float64
-	r          *rand.Rand
+	dropRate float64
+	r        *rand.Rand
 }
 
 func NewFaultInjectedConn(c net.Conn, dropRate float64) *FaultInjectedConn {
@@ -113,10 +113,10 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 				if err := ch.WriteMessage(data); err != nil {
 					return
 				}
-				
+
 				// Use a deadline for reading to avoid hanging forever on lost messages
 				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-				
+
 				readDone := make(chan struct{})
 				var resp []byte
 				var readErr error
@@ -133,7 +133,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 					}
 				case <-ctx.Done():
 					cancel()
-					// In a real chaos test, we'd expect some failures, 
+					// In a real chaos test, we'd expect some failures,
 					// but here we are just stress testing the concurrency.
 				}
 			}
@@ -170,7 +170,7 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	
+
 	// Inject 10% packet drop at the TCP level
 	dialer := ChaosDialer{
 		DropRate: 0.10,
@@ -191,7 +191,7 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		data := []byte("chaos-msg")
 		_ = ch.WriteMessage(data)
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		readErr := make(chan error, 1)
 		go func() {
