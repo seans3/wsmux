@@ -1,6 +1,9 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+// Package stress provides high-load and edge-case testing for the multiplexing library.
+// It ensures that the protocol framing, concurrency management, and lifecycle state
+// machines remain robust under heavy use and various interaction patterns.
 package stress
 
 import (
@@ -20,8 +23,14 @@ import (
 	"github.com/seans3/websockets/pkg/multiplex"
 )
 
+// TestStress_Echo verifies that multiple logical channels can independently 
+// send and receive large amounts of data concurrently over a single physical 
+// connection. It specifically tests:
+// 1. Thread-safe multiplexing of data frames.
+// 2. Variable chunk sizes to stress framing logic.
+// 3. Graceful half-close (EOF) propagation using CloseWrite().
 func TestStress_Echo(t *testing.T) {
-	// Setup a test server that echoes everything back on every channel
+	// Setup a test server that echoes everything back on every channel.
 	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -35,12 +44,13 @@ func TestStress_Echo(t *testing.T) {
 			return
 		}
 		
+		// For every new channel created by the client, start an echo goroutine.
 		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			go func() {
-				// Echo pattern: Read from ch, Write back to ch.
-				// io.Copy will stop when it gets EOF from the remote peer (CloseWrite).
-				// Then we CloseWrite back to signal we are done too.
+				// Echo pattern: Read from ch until EOF, then Write back to ch.
+				// io.Copy will stop when it receives the EOF frame from the remote peer.
 				_, _ = io.Copy(ch, ch)
+				// Signal to the client that we are also done writing.
 				_ = ch.CloseWrite()
 			}()
 			return nil
@@ -50,7 +60,7 @@ func TestStress_Echo(t *testing.T) {
 	}))
 	defer s.Close()
 
-	// Client Dials
+	// Connect to the test server.
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
@@ -68,6 +78,7 @@ func TestStress_Echo(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numChannels)
 
+	// Launch multiple concurrent workers, each using a unique logical channel.
 	for i := 0; i < numChannels; i++ {
 		go func(id uint64) {
 			defer wg.Done()
@@ -78,25 +89,27 @@ func TestStress_Echo(t *testing.T) {
 				return
 			}
 
-			// Generate random data
+			// Generate random binary data to ensure protocol-neutral transfer.
 			randomData := make([]byte, dataSize)
 			if _, err := rand.Read(randomData); err != nil {
 				t.Errorf("Unexpected error reading random data: %v", err)
 				return
 			}
 
-			// Channel implements io.Reader and io.Writer
+			// Start a background reader to collect the echoed data.
 			errCh := make(chan error, 1)
 			var received bytes.Buffer
 			go func() {
+				// io.Copy reads until the server sends an EOF frame.
 				_, err := io.Copy(&received, ch)
 				errCh <- err
 			}()
 
-			// Write random data in random chunks to stress framing
+			// Write random data in random-sized chunks to stress the internal 
+			// buffer and framing logic.
 			written := 0
 			for written < dataSize {
-				chunkSize := 1024 + (id % 16 * 1024) // variable chunk sizes
+				chunkSize := 1024 + (id % 16 * 1024) // variable chunk sizes based on channel ID
 				if written+int(chunkSize) > dataSize {
 					chunkSize = uint64(dataSize - written)
 				}
@@ -108,13 +121,14 @@ func TestStress_Echo(t *testing.T) {
 				written += n
 			}
 
-			// Signal EOF (half-close)
+			// Signal half-close (EOF) to the server. The client is done sending, 
+			// but still needs to receive the remaining echoed data.
 			if err := ch.CloseWrite(); err != nil {
 				t.Errorf("CloseWrite error on channel %d: %v", id, err)
 				return
 			}
 
-			// Wait for echo to complete
+			// Wait for the background reader to finish receiving the echoed data.
 			select {
 			case err := <-errCh:
 				if err != nil && err != io.EOF {
@@ -125,6 +139,7 @@ func TestStress_Echo(t *testing.T) {
 				return
 			}
 
+			// Verify data integrity.
 			if !bytes.Equal(randomData, received.Bytes()) {
 				t.Errorf("Data mismatch on channel %d", id)
 			}
@@ -134,8 +149,12 @@ func TestStress_Echo(t *testing.T) {
 	wg.Wait()
 }
 
+// TestStress_CrossChannel verifies that data can be relayed between different 
+// logical channels. This simulates a "proxy" or "control plane" pattern where 
+// one channel acts as an input and another as an output.
 func TestStress_CrossChannel(t *testing.T) {
-	// Server relays Even ID -> (Even ID + 1)
+	// Setup a server that relays data between pairs of channels: 
+	// Even ID (Inbound) -> (Even ID + 1) (Outbound).
 	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -152,18 +171,19 @@ func TestStress_CrossChannel(t *testing.T) {
 		var mu sync.Mutex
 		channels := make(map[uint64]*multiplex.Channel)
 
+		// Handler to pair up channels as they are created.
 		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			id := ch.GetChannelID()
 			mu.Lock()
 			channels[id] = ch
 			
 			if id%2 == 0 {
-				// Inbound (Even)
+				// We just received the "Even" channel. Check if the "Odd" partner exists.
 				if partner, ok := channels[id+1]; ok {
 					go relay(ch, partner)
 				}
 			} else {
-				// Outbound (Odd)
+				// We just received the "Odd" channel. Check if the "Even" partner exists.
 				if partner, ok := channels[id-1]; ok {
 					go relay(partner, ch)
 				}
@@ -176,7 +196,6 @@ func TestStress_CrossChannel(t *testing.T) {
 	}))
 	defer s.Close()
 
-	// Client Dials
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
@@ -194,6 +213,7 @@ func TestStress_CrossChannel(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numPairs)
 
+	// Launch workers to handle pairs of channels.
 	for i := 0; i < numPairs; i++ {
 		go func(pairID int) {
 			defer wg.Done()
@@ -201,11 +221,13 @@ func TestStress_CrossChannel(t *testing.T) {
 			idIn := uint64(pairID * 2)
 			idOut := uint64(pairID*2 + 1)
 
+			// Create the "Inbound" channel where data will be sent.
 			chIn, err := clientConn.CreateChannel(idIn)
 			if err != nil {
 				t.Errorf("Failed to create chIn %d: %v", idIn, err)
 				return
 			}
+			// Create the "Outbound" channel where relayed data will be received.
 			chOut, err := clientConn.CreateChannel(idOut)
 			if err != nil {
 				t.Errorf("Failed to create chOut %d: %v", idOut, err)
@@ -218,6 +240,7 @@ func TestStress_CrossChannel(t *testing.T) {
 				return
 			}
 
+			// Reader for the relayed data.
 			errCh := make(chan error, 1)
 			var received bytes.Buffer
 			go func() {
@@ -225,19 +248,20 @@ func TestStress_CrossChannel(t *testing.T) {
 				errCh <- err
 			}()
 
-			// Write to Inbound channel
+			// Write to the Inbound channel.
 			if _, err := chIn.Write(randomData); err != nil {
 				t.Errorf("Write error on chIn %d: %v", idIn, err)
 				return
 			}
 			
-			// Half-close Inbound to signal we are done sending
+			// Half-close Inbound to signal that no more data is coming.
+			// This should trigger the server relay to also CloseWrite on chOut.
 			if err := chIn.CloseWrite(); err != nil {
 				t.Errorf("CloseWrite error on chIn %d: %v", idIn, err)
 				return
 			}
 
-			// Wait for relay to finish on Outbound channel
+			// Wait for the full relayed payload to be received.
 			select {
 			case err := <-errCh:
 				if err != nil && err != io.EOF {
@@ -257,15 +281,18 @@ func TestStress_CrossChannel(t *testing.T) {
 	wg.Wait()
 }
 
+// relay helper reads from one channel and writes to another, then propagates EOF.
 func relay(in, out *multiplex.Channel) {
-	// Read from 'in' until EOF, write to 'out'
+	// Read from 'in' until EOF, write everything to 'out'.
 	_, _ = io.Copy(out, in)
-	// Signal EOF on 'out'
+	// Propagate the EOF to the next hop.
 	_ = out.CloseWrite()
 }
 
+// TestStress_RapidLifecycle stresses the internal channel lookup table (demuxer)
+// by rapidly opening and immediately closing many channels. This ensures 
+// that there are no race conditions in channel registration or cleanup.
 func TestStress_RapidLifecycle(t *testing.T) {
-	// Rapidly open and close channels to stress the demuxer and connection state
 	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -278,7 +305,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 			return
 		}
 		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
-			// Immediate close
+			// Immediate server-side abort/close.
 			return ch.Close()
 		})
 		<-c.Done()
@@ -302,10 +329,10 @@ func TestStress_RapidLifecycle(t *testing.T) {
 			defer wg.Done()
 			ch, err := clientConn.CreateChannel(id)
 			if err != nil {
-				// Might fail if connection is closing, but here it should succeed
 				return
 			}
-			// Random delay
+			// Introduce a small, random delay before client-side close to 
+			// interleave create/close frames.
 			time.Sleep(time.Duration(id%10) * time.Millisecond)
 			_ = ch.Close()
 		}(uint64(i + 1))
@@ -314,8 +341,11 @@ func TestStress_RapidLifecycle(t *testing.T) {
 	wg.Wait()
 }
 
+// TestStress_ParallelConns verifies that the library handles multiple concurrent 
+// physical connections, each managing multiple logical channels. This ensures 
+// that global state (if any) is correctly isolated and that the library 
+// scales with connection count.
 func TestStress_ParallelConns(t *testing.T) {
-	// Stress with multiple physical connections, each with multiple channels
 	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -329,6 +359,7 @@ func TestStress_ParallelConns(t *testing.T) {
 		}
 		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			go func() {
+				// Echo and half-close.
 				_, _ = io.Copy(ch, ch)
 				_ = ch.CloseWrite()
 			}()
@@ -366,6 +397,8 @@ func TestStress_ParallelConns(t *testing.T) {
 					if err != nil {
 						return
 					}
+					
+					// Simple request-response check.
 					data := []byte(fmt.Sprintf("data-from-conn-%d-ch-%d", connID, chID))
 					if _, err := ch.Write(data); err != nil {
 						return
