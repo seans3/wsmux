@@ -3,6 +3,10 @@
 
 //go:build long
 
+// This file contains tests to verify connection-level backpressure and 
+// Head-of-Line (HoL) blocking behavior. It serves to document current 
+// limitations and ensure consistent behavior until more advanced per-channel 
+// flow control is implemented.
 package multiplex
 
 import (
