@@ -28,6 +28,7 @@ The project uses a `Makefile` for standard development tasks.
 
 ## Development Conventions
 
+- **Development Practices:** Format and lint code (`make fmt`, `make lint`) before committing.
 - **Concurrency:** All components are designed to be thread-safe. A dedicated writer goroutine handles serialized writes to the underlying WebSocket.
 - **Testing:**
   - **Unit Tests:** Mandated for all new features and bug fixes.
