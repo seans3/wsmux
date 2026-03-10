@@ -10,11 +10,20 @@ export PATH := $(MYGOBIN):$(PATH)
 build:
 	go build -o bin/ws-server cmd/server/ws-server.go
 	go build -o bin/ws-client cmd/client/ws-client.go
+	go build -o bin/ws-rexec-server cmd/ws-rexec-server/main.go
+	go build -o bin/ws-rexec-client cmd/ws-rexec-client/main.go
+
+.PHONY: build-rexec
+build-rexec:
+	go build -o bin/ws-rexec-server cmd/ws-rexec-server/main.go
+	go build -o bin/ws-rexec-client cmd/ws-rexec-client/main.go
 
 .PHONY: install
 install:
 	go install cmd/server/ws-server.go
 	go install cmd/client/ws-client.go
+	go install cmd/ws-rexec-server/main.go
+	go install cmd/ws-rexec-client/main.go
 
 "$(MYGOBIN)/stringer":
 	go install golang.org/x/tools/cmd/stringer@v0.1.10
