@@ -59,9 +59,9 @@ To ensure high code quality and maintainability, all contributions must adhere t
 ### Milestone 6: Per-Channel Flow Control (Window-Based)
 - [x] Design window-based flow control mechanism.
 - [ ] **Milestone 6.1: Protocol Implementation**
-    - [ ] Update `internal/protocol` with `FlagWindowUpdate` (0x05).
-    - [ ] Implement 4-byte payload encoding/decoding for window increments.
-    - [ ] **Test:** Unit tests in `protocol_test.go` for new frame type.
+    - [x] Update `internal/protocol` with `FlagWindowUpdate` (0x05).
+    - [x] Implement 4-byte payload encoding/decoding for window increments.
+    - [x] **Test:** Unit tests in `protocol_test.go` for new frame type.
 - [ ] **Milestone 6.2: Egress Flow Control**
     - [ ] Implement `SendWindow` in `Channel.Write()`.
     - [ ] Use `sync.Cond` to block writes when the window is zero.
