@@ -1,4 +1,4 @@
-// Copyright 2023 Sean Sullivan.
+// Copyright 2026 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
 // This file verifies the half-close (EOF) and full-close state machine for

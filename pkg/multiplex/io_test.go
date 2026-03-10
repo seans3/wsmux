@@ -1,4 +1,4 @@
-// Copyright 2023 Sean Sullivan.
+// Copyright 2026 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
 // This file verifies that logical channels correctly implement the standard

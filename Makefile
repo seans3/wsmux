@@ -1,4 +1,4 @@
-# Copyright 2023 Sean Sullivan.
+# Copyright 2026 Sean Sullivan.
 # SPDX-License-Identifier: MIT
 
 GOPATH := $(shell go env GOPATH)
@@ -79,7 +79,7 @@ generate: "$(MYGOBIN)/stringer"
 
 .PHONY: license
 license: "$(MYGOBIN)/addlicense"
-	"$(MYGOBIN)/addlicense" -v -y 2023 -c "Sean Sullivan." -s=only .
+	"$(MYGOBIN)/addlicense" -v -y 2026 -c "Sean Sullivan." -s=only .
 
 .PHONY: verify-license
 verify-license: "$(MYGOBIN)/addlicense"
