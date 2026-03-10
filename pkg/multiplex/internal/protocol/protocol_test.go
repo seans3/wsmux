@@ -103,6 +103,34 @@ func TestDecode_Errors(t *testing.T) {
 	})
 }
 
+func TestWindowUpdate_EncodeDecode(t *testing.T) {
+	const chID uint64 = 42
+	const increment uint32 = 1024 * 64
+
+	frame := EncodeWindowUpdate(chID, increment)
+	if frame.ChannelID != chID {
+		t.Errorf("ChannelID = %d, want %d", frame.ChannelID, chID)
+	}
+	if frame.Flag != FlagWindowUpdate {
+		t.Errorf("Flag = %x, want %x", frame.Flag, FlagWindowUpdate)
+	}
+
+	decodedIncrement, err := DecodeWindowUpdate(frame.Payload)
+	if err != nil {
+		t.Fatalf("DecodeWindowUpdate error: %v", err)
+	}
+	if decodedIncrement != increment {
+		t.Errorf("Increment = %d, want %d", decodedIncrement, increment)
+	}
+
+	t.Run("Too short", func(t *testing.T) {
+		_, err := DecodeWindowUpdate([]byte{0x01, 0x02, 0x03})
+		if err != ErrFrameTooShort {
+			t.Errorf("Expected ErrFrameTooShort, got %v", err)
+		}
+	})
+}
+
 func FuzzDecode(f *testing.F) {
 	// Seed with valid frames
 	f.Add((&Frame{ChannelID: 1, Flag: FlagData, Payload: []byte("hello")}).Encode())

@@ -13,10 +13,11 @@ const ProtocolVersion = "multiplex.v1.0"
 
 // Flag types for the multiplexing protocol.
 const (
-	FlagData   byte = 0x01
-	FlagCreate byte = 0x02
-	FlagClose  byte = 0x03
-	FlagEOF    byte = 0x04
+	FlagData         byte = 0x01
+	FlagCreate       byte = 0x02
+	FlagClose        byte = 0x03
+	FlagEOF          byte = 0x04
+	FlagWindowUpdate byte = 0x05
 )
 
 var (
@@ -59,4 +60,23 @@ func Decode(data []byte) (*Frame, error) {
 		Payload:   data[n+1:],
 	}
 	return f, nil
+}
+
+// EncodeWindowUpdate creates a Frame for a window update.
+func EncodeWindowUpdate(channelID uint64, increment uint32) *Frame {
+	payload := make([]byte, 4)
+	binary.BigEndian.PutUint32(payload, increment)
+	return &Frame{
+		ChannelID: channelID,
+		Flag:      FlagWindowUpdate,
+		Payload:   payload,
+	}
+}
+
+// DecodeWindowUpdate extracts the window increment from a frame payload.
+func DecodeWindowUpdate(payload []byte) (uint32, error) {
+	if len(payload) < 4 {
+		return 0, ErrFrameTooShort
+	}
+	return binary.BigEndian.Uint32(payload[:4]), nil
 }
