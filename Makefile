@@ -41,6 +41,10 @@ test:
 test-e2e:
 	@echo "No e2e tests implemented yet."
 
+.PHONY: stress
+stress:
+	go test -v -race -timeout 5m ./cmd/stress/...
+
 .PHONY: fmt
 fmt:
 	go fmt ./...
