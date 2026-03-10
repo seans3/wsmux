@@ -1,58 +1,81 @@
 # WebSockets Multiplexing Library
 
-A Go library that extends [gorilla/websocket](https://github.com/gorilla/websocket) to provide a robust multiplexing/demultiplexing interface. This allows multiple independent, logical streams (Channels) to coexist over a single persistent WebSocket connection.
+A robust Go library that extends [gorilla/websocket](https://github.com/gorilla/websocket) to provide a sophisticated multiplexing/demultiplexing interface. It allows multiple independent, logical streams (**Channels**) to coexist over a single persistent physical WebSocket connection, providing TCP-like semantics (including half-close EOF) for logical streams.
 
 ## Features
 
-- **Multiplexing:** Run multiple logical streams over one physical connection.
-- **Channel Isolation:** Independent headers and data flow for each channel.
-- **Familiar API:** Built on top of standard Go `io` interfaces and common WebSocket patterns.
-- **Clean Lifecycle:** Managed connection upgrading and dialing with built-in channel handlers.
+- **Efficient Multiplexing:** Run unlimited logical streams over one physical connection using a lightweight binary protocol.
+- **Standard Library Integration:** `multiplex.Channel` implements `io.Reader` and `io.Writer`, enabling seamless use with `io.Copy`, `bufio`, and other standard tools.
+- **Robust Lifecycle Management:** Supports graceful handshake negotiation, half-close (EOF) propagation, and abrupt disconnect recovery.
+- **High-Performance Concurrency:** Serialized, non-blocking writes via a dedicated background goroutine and per-channel read buffering.
+- **Configurable Reliability:** Built-in Ping/Pong heartbeats and configurable I/O deadlines.
 
-## Project Status
+---
 
-This project is currently under active development. See [PLAN.md](PLAN.md) for our implementation roadmap and milestones.
+## Architecture & Design
 
-## Building
+### 1. Framing Protocol
+The library uses a custom binary framing format designed for minimal overhead:
+`[Varint ChannelID] [1-byte Flag] [Payload]`
 
-To build the example server and client:
+- **ChannelID**: Variable-length integer (Base-128) supporting up to 64-bit IDs while remaining space-efficient for small IDs.
+- **Flags**:
+    - `0x01 (Data)`: Standard data payload.
+    - `0x02 (Create)`: Signal to open a new logical channel.
+    - `0x03 (Close)`: Immediate abort of a channel.
+    - `0x04 (EOF)`: Graceful half-close; no more data will be sent from this side.
 
+### 2. Concurrency Model
+WebSocket connections in Gorilla are not thread-safe for concurrent writes. This library solves this by using a **centralized writer goroutine** per connection. All logical channels dispatch messages to a shared internal channel, ensuring strictly serialized access to the underlying WebSocket while allowing application-level writes to remain non-blocking until the global buffer is saturated.
+
+### 3. Lifecycle State Machine
+Each channel maintains an independent state machine allowing for "Half-Close" (EOF) support. This means a client can signal it is finished sending data (e.g., closing a file upload) while continuing to read a response from the server.
+
+---
+
+## Getting Started
+
+### Installation
 ```bash
 make build
 ```
+This builds all example binaries into the `bin/` directory.
 
-This installs `ws-server` and `ws-client` to your `$GOPATH/bin`.
+### Example 1: Basic Echo
+A simple demonstration where every message sent by the client is echoed back by the server.
 
-## Running the Examples
-
-### 1. Start the Server
+**Start the Server:**
 ```bash
-ws-server -addr localhost:8080
+./bin/ws-server -addr localhost:8080
 ```
 
-### 2. Remote Execution Example (ws-rexec)
-
-This example demonstrates piping three independent logical channels (STDIN, STDOUT, STDERR) to a remote shell.
-
-#### Start the Rexec Server
+**Start the Client:**
 ```bash
-ws-rexec-server -addr localhost:8081
+./bin/ws-client -addr localhost:8080
 ```
 
-#### Start the Rexec Client
+### Example 2: Remote Execution (ws-rexec)
+A more advanced example that pipes `STDIN`, `STDOUT`, and `STDERR` to a remote shell (e.g., `bash`) over three independent logical channels.
+
+**Start the Rexec Server:**
 ```bash
-# Connect and run an interactive bash session
+./bin/ws-rexec-server -addr localhost:8081
+```
+
+**Run a Command Remotely:**
+```bash
+# Interactive mode
 ./bin/ws-rexec-client -addr localhost:8081
 
-# Or pipe a command directly
-echo "ls -la; exit" | ./bin/ws-rexec-client -addr localhost:8081
+# Piped mode
+echo "uptime; exit" | ./bin/ws-rexec-client -addr localhost:8081
 ```
+
+---
 
 ## API Documentation
 
-The library provides a high-level wrapper around `gorilla/websocket` to handle multiplexing.
-
-### 1. Connection Establishment
+### Connection Establishment
 
 #### Server: `multiplex.Upgrader`
 Wraps `websocket.Upgrader` to handle the multiplexing handshake.
@@ -76,36 +99,36 @@ dialer := multiplex.Dialer{
 conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
 
-### 2. Connection Management: `multiplex.Conn`
+### Connection Management: `multiplex.Conn`
+- **`CreateChannel(id uint64)`**: Creates a new outbound logical channel.
+- **`SetChannelCreatedHandler(handler)`**: Registers a callback for incoming remote channels.
+- **`Close()`**: Gracefully closes the connection and all associated channels.
+- **`Done()`**: Returns a channel that closes when the connection terminates.
 
-A `Conn` represents the physical WebSocket connection hosting multiple logical channels.
+### Logical Streams: `multiplex.Channel`
+- **`Read(p []byte)` / `Write(p []byte)`**: Standard `io` interfaces.
+- **`CloseWrite()`**: Sends an EOF frame. Local side is done writing; remote side will receive `io.EOF`.
+- **`GetChannelID()`**: Returns the unique ID for this stream.
 
-- **`CreateChannel(id uint64) (*Channel, error)`**: Creates a new outbound logical channel with the given ID.
-- **`SetChannelCreatedHandler(handler func(*Channel) error)`**: Registers a callback for when the remote peer creates a new channel.
-- **`Close()`**: Gracefully closes the physical connection and all logical channels.
-- **`Done() <-chan struct{}`**: Returns a channel that is closed when the connection terminates.
+---
 
-### 3. Logical Streams: `multiplex.Channel`
+## Testing & Verification
 
-A `Channel` represents a single logical stream. It implements the standard `io.Reader` and `io.Writer` interfaces.
+The project includes three distinct test suites:
+1. **Unit Tests:** Fast verification of core logic (`make test`).
+2. **Long Tests:** Resource leak analysis, chaos testing, and stability checks (`make test-long`).
+3. **Stress Tests:** High-load concurrency and data integrity validation (`make stress`).
 
-- **`Read(p []byte) (int, error)`**: Reads data from the channel. Returns `io.EOF` when the remote peer calls `CloseWrite()`.
-- **`Write(p []byte) (int, error)`**: Writes data to the channel.
-- **`WriteMessage(data []byte)`**: Sends a single discrete message.
-- **`ReadMessage() ([]byte, error)`**: Reads a single discrete message.
-- **`CloseWrite()`**: Half-closes the channel (sends EOF). You can no longer write, but can still read.
-- **`Close()`**: Full-closes the channel immediately.
-- **`GetChannelID() uint64`**: Returns the unique ID of the channel.
+To run the full suite:
+```bash
+make test-all
+```
 
-## Documentation
+## Roadmap
 
-For a detailed implementation plan and upcoming features, refer to [PLAN.md](PLAN.md).
+The project is under active development. Current priorities include:
+- [ ] **Flow Control & Back-pressure**: Implementing window-based flow control to prevent Head-of-Line blocking.
+- [x] **Robustness Testing**: Completed comprehensive suite for large IDs and malformed frames.
+- [x] **Remote Execution Example**: Completed implementation of `ws-rexec`.
 
-## TODO
-
-1. Fix connection teardown (client/server clean close).
-2. Implement Ping/Pong heartbeats.
-3. Refactor core logic into `/pkg`.
-4. Decouple examples from `os.Stdin` / `fmt.Printf`.
-5. Add comprehensive unit tests.
-6. Implement sub-protocol version negotiation.
+See [PLAN.md](PLAN.md) for the detailed implementation roadmap.
