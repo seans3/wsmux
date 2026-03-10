@@ -30,11 +30,23 @@ This installs `ws-server` and `ws-client` to your `$GOPATH/bin`.
 ws-server -addr localhost:8080
 ```
 
-### 2. Start the Client
+### 2. Remote Execution Example (ws-rexec)
+
+This example demonstrates piping three independent logical channels (STDIN, STDOUT, STDERR) to a remote shell.
+
+#### Start the Rexec Server
 ```bash
-ws-client -addr localhost:8080
+ws-rexec-server -addr localhost:8081
 ```
-Type messages into the client terminal. Each message is sent over the multiplexed connection and echoed back by the server.
+
+#### Start the Rexec Client
+```bash
+# Connect and run an interactive bash session
+./bin/ws-rexec-client -addr localhost:8081
+
+# Or pipe a command directly
+echo "ls -la; exit" | ./bin/ws-rexec-client -addr localhost:8081
+```
 
 ## API Preview
 
