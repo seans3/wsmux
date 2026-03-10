@@ -54,12 +54,12 @@ test-long:
 test-e2e:
 	@echo "No e2e tests implemented yet."
 
-.PHONY: stress
-stress:
+.PHONY: test-stress
+test-stress:
 	go test -v -race -timeout 5m -tags=stress ./pkg/multiplex/...
 
 .PHONY: test-all
-test-all: test test-long stress test-e2e
+test-all: test test-long test-stress test-e2e
 
 .PHONY: fmt
 fmt:
