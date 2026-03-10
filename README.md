@@ -48,38 +48,54 @@ ws-rexec-server -addr localhost:8081
 echo "ls -la; exit" | ./bin/ws-rexec-client -addr localhost:8081
 ```
 
-## API Preview
+## API Documentation
 
-### Server Upgrader
+The library provides a high-level wrapper around `gorilla/websocket` to handle multiplexing.
+
+### 1. Connection Establishment
+
+#### Server: `multiplex.Upgrader`
+Wraps `websocket.Upgrader` to handle the multiplexing handshake.
 ```go
-upgrader := multiplex.Upgrader{...}
+upgrader := multiplex.Upgrader{
+    Upgrader: websocket.Upgrader{...},
+    PingInterval: 30 * time.Second,
+    ReadTimeout:  60 * time.Second,
+}
 conn, err := upgrader.Upgrade(w, r, responseHeader)
 ```
 
-### Client Dialer
+#### Client: `multiplex.Dialer`
+Wraps `websocket.Dialer` to connect to a multiplexed server.
 ```go
-dialer := multiplex.Dialer{...}
-conn, _, err := dialer.Dial(ctx, url, requestHeader)
+dialer := multiplex.Dialer{
+    Dialer: websocket.Dialer{...},
+    PingInterval: 30 * time.Second,
+    ReadTimeout:  60 * time.Second,
+}
+conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
 
-### Connection Management
-```go
-// Create a new logical channel
-channel, err := conn.CreateChannel("chat-room-1", map[string]string{"user": "alice"})
+### 2. Connection Management: `multiplex.Conn`
 
-// Handle incoming channels from the remote peer
-conn.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
-    fmt.Printf("New channel created: %s\n", ch.GetChannelID())
-    return nil
-})
-```
+A `Conn` represents the physical WebSocket connection hosting multiple logical channels.
 
-### Channel Operations
-```go
-// Channels implement message-based Read/Write
-err := channel.WriteMessage([]byte("Hello World"))
-msg, err := channel.ReadMessage()
-```
+- **`CreateChannel(id uint64) (*Channel, error)`**: Creates a new outbound logical channel with the given ID.
+- **`SetChannelCreatedHandler(handler func(*Channel) error)`**: Registers a callback for when the remote peer creates a new channel.
+- **`Close()`**: Gracefully closes the physical connection and all logical channels.
+- **`Done() <-chan struct{}`**: Returns a channel that is closed when the connection terminates.
+
+### 3. Logical Streams: `multiplex.Channel`
+
+A `Channel` represents a single logical stream. It implements the standard `io.Reader` and `io.Writer` interfaces.
+
+- **`Read(p []byte) (int, error)`**: Reads data from the channel. Returns `io.EOF` when the remote peer calls `CloseWrite()`.
+- **`Write(p []byte) (int, error)`**: Writes data to the channel.
+- **`WriteMessage(data []byte)`**: Sends a single discrete message.
+- **`ReadMessage() ([]byte, error)`**: Reads a single discrete message.
+- **`CloseWrite()`**: Half-closes the channel (sends EOF). You can no longer write, but can still read.
+- **`Close()`**: Full-closes the channel immediately.
+- **`GetChannelID() uint64`**: Returns the unique ID of the channel.
 
 ## Documentation
 
