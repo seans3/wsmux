@@ -1,6 +1,9 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+// This file verifies the half-close (EOF) and full-close state machine for 
+// logical channels, ensuring that data can continue to be read after the 
+// local side has finished writing.
 package multiplex
 
 import (

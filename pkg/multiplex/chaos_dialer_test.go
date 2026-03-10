@@ -1,6 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+// This file implements a FaultInjectedConn and associated dialer to 
+// simulate network-level failures for chaos testing.
 package multiplex
 
 import (

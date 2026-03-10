@@ -1,6 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+// This file contains unit tests and fuzzing targets for the binary 
+// protocol framing, encoding, and decoding logic.
 package protocol
 
 import (

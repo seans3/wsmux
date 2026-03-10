@@ -1,6 +1,9 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+// This file contains "chaos" tests that use a fault-injected network 
+// connection to simulate network instability, drops, and latency, 
+// ensuring the multiplexer can handle ungraceful disconnects.
 package multiplex
 
 import (
