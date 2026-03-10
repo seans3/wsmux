@@ -56,17 +56,19 @@ To ensure high code quality and maintainability, all contributions must adhere t
 - [x] Implement comprehensive robustness tests (Large IDs, Malformed frames, Re-entry).
 - [x] Verify concurrency fairness between channels.
 
-### Milestone 6: Advanced Protocol Features
-- [x] Implement sub-protocol version negotiation improvements.
-- [ ] Implement **Flow Control & Back-pressure**.
-    - [ ] Define window-based or credit-based flow control mechanism.
-    - [ ] Prevent Head-of-Line (HoL) blocking when one channel's buffer is full.
+### Milestone 6: Per-Channel Flow Control (Window-Based)
+- [x] Design window-based flow control mechanism.
+- [ ] **Milestone 6.1:** Update `internal/protocol` with `FlagWindowUpdate` (0x05) and 4-byte payload encoding.
+- [ ] **Milestone 6.2:** Implement `SendWindow` in `Channel.Write()` with blocking logic using `sync.Cond`.
+- [ ] **Milestone 6.3:** Implement `RecvWindow` tracking and automatic `WindowUpdate` frame transmission.
+- [ ] **Milestone 6.4:** Resolve Head-of-Line (HoL) blocking by making `enqueueRead` non-blocking.
+- [ ] **Milestone 6.5:** Verify fix with `TestVerification_HoLBlocking` (it should now pass with high message counts).
 
 ### Milestone 7: Compelling Example Application
-- [ ] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
-    - [ ] Maps `stdin`, `stdout`, and `stderr` to independent logical channels.
-    - [ ] Demonstrates `CloseWrite()` signaling EOF to a remote shell (e.g. `bash`).
-    - [ ] Uses `io.Copy` for idiomatic data piping.
+- [x] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
+    - [x] Maps `stdin`, `stdout`, and `stderr` to independent logical channels.
+    - [x] Demonstrates `CloseWrite()` signaling EOF to a remote shell (e.g. `bash`).
+    - [x] Uses `io.Copy` for idiomatic data piping.
 
 ---
 
