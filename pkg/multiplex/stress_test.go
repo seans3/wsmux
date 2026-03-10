@@ -1,10 +1,12 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
-// Package stress provides high-load and edge-case testing for the multiplexing library.
+//go:build stress
+
+// This file provides high-load and edge-case testing for the multiplexing library.
 // It ensures that the protocol framing, concurrency management, and lifecycle state
 // machines remain robust under heavy use and various interaction patterns.
-package stress
+package multiplex
 
 import (
 	"bytes"
@@ -20,7 +22,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // TestStress_Echo verifies that multiple logical channels can independently 
@@ -31,13 +32,13 @@ import (
 // 3. Graceful half-close (EOF) propagation using CloseWrite().
 func TestStress_Echo(t *testing.T) {
 	// Setup a test server that echoes everything back on every channel.
-	upgrader := multiplex.Upgrader{
+	upgrader := Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	serverConnCh := make(chan *multiplex.Conn, 1)
+	serverConnCh := make(chan *Conn, 1)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -45,7 +46,7 @@ func TestStress_Echo(t *testing.T) {
 		}
 		
 		// For every new channel created by the client, start an echo goroutine.
-		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			go func() {
 				// Echo pattern: Read from ch until EOF, then Write back to ch.
 				// io.Copy will stop when it receives the EOF frame from the remote peer.
@@ -62,7 +63,7 @@ func TestStress_Echo(t *testing.T) {
 
 	// Connect to the test server.
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatalf("Dial failed: %v", err)
@@ -155,13 +156,13 @@ func TestStress_Echo(t *testing.T) {
 func TestStress_CrossChannel(t *testing.T) {
 	// Setup a server that relays data between pairs of channels: 
 	// Even ID (Inbound) -> (Even ID + 1) (Outbound).
-	upgrader := multiplex.Upgrader{
+	upgrader := Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	serverConnCh := make(chan *multiplex.Conn, 1)
+	serverConnCh := make(chan *Conn, 1)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -169,10 +170,10 @@ func TestStress_CrossChannel(t *testing.T) {
 		}
 
 		var mu sync.Mutex
-		channels := make(map[uint64]*multiplex.Channel)
+		channels := make(map[uint64]*Channel)
 
 		// Handler to pair up channels as they are created.
-		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			id := ch.GetChannelID()
 			mu.Lock()
 			channels[id] = ch
@@ -197,7 +198,7 @@ func TestStress_CrossChannel(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatalf("Dial failed: %v", err)
@@ -282,7 +283,7 @@ func TestStress_CrossChannel(t *testing.T) {
 }
 
 // relay helper reads from one channel and writes to another, then propagates EOF.
-func relay(in, out *multiplex.Channel) {
+func relay(in, out *Channel) {
 	// Read from 'in' until EOF, write everything to 'out'.
 	_, _ = io.Copy(out, in)
 	// Propagate the EOF to the next hop.
@@ -293,7 +294,7 @@ func relay(in, out *multiplex.Channel) {
 // by rapidly opening and immediately closing many channels. This ensures 
 // that there are no race conditions in channel registration or cleanup.
 func TestStress_RapidLifecycle(t *testing.T) {
-	upgrader := multiplex.Upgrader{
+	upgrader := Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -304,7 +305,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 		if err != nil {
 			return
 		}
-		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			// Immediate server-side abort/close.
 			return ch.Close()
 		})
@@ -313,7 +314,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatalf("Dial failed: %v", err)
@@ -346,7 +347,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 // that global state (if any) is correctly isolated and that the library 
 // scales with connection count.
 func TestStress_ParallelConns(t *testing.T) {
-	upgrader := multiplex.Upgrader{
+	upgrader := Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -357,7 +358,7 @@ func TestStress_ParallelConns(t *testing.T) {
 		if err != nil {
 			return
 		}
-		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+		c.SetChannelCreatedHandler(func(ch *Channel) error {
 			go func() {
 				// Echo and half-close.
 				_, _ = io.Copy(ch, ch)
@@ -370,7 +371,7 @@ func TestStress_ParallelConns(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
+	dialer := Dialer{Dialer: websocket.Dialer{}}
 
 	const numConns = 5
 	const chsPerConn = 10

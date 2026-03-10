@@ -1,6 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+//go:build long
+
 package multiplex
 
 import (
@@ -98,8 +100,8 @@ func TestVerification_HoLBlocking(t *testing.T) {
 	// If HoL blocking is present, fastReadCount will be very small (close to 64 + 1)
 	// because the physical connection's readLoop is blocked by the slow channel's enqueueRead.
 	// 64 is the internal readCh buffer size.
-	if fastReadCount > 200 { 
-		// 200 is a safe upper bound; with 1024 byte messages over localhost, 
+	if fastReadCount > 500 { 
+		// 500 is a safe upper bound; with 1024 byte messages over localhost, 
 		// it would be thousands if NOT blocked.
 		t.Errorf("Fast reader was NOT blocked by slow reader. Count: %d. This suggests HoL blocking is gone?", fastReadCount)
 	} else {

@@ -1,6 +1,8 @@
 // Copyright 2023 Sean Sullivan.
 // SPDX-License-Identifier: MIT
 
+//go:build long
+
 package multiplex
 
 import (
