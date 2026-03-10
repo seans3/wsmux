@@ -4,7 +4,7 @@
 //go:build long
 
 // This file contains tests for protocol violations and malformed input.
-// It ensures that the multiplexer is resilient against buggy or malicious 
+// It ensures that the multiplexer is resilient against buggy or malicious
 // peers and does not panic when receiving unexpected data.
 package multiplex
 
@@ -37,7 +37,7 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	
+
 	// We'll use a raw gorilla websocket to send "illegal" frames
 	ws, _, err := websocket.DefaultDialer.Dial(u, nil)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 			// Success
 		}
 	})
-	
+
 	t.Run("Frame too short", func(t *testing.T) {
 		// Only 1 byte (might be interpreted as partial ID, but not enough for flag)
 		err := ws.WriteMessage(websocket.BinaryMessage, []byte{0x01})

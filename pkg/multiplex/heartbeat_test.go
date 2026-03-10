@@ -3,7 +3,7 @@
 
 //go:build long
 
-// This file contains tests for the WebSocket heartbeat mechanism (Ping/Pong) 
+// This file contains tests for the WebSocket heartbeat mechanism (Ping/Pong)
 
 // and read/write deadlines, ensuring that stale or broken connections are
 // detected and closed.

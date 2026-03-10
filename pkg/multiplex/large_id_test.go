@@ -3,8 +3,8 @@
 
 //go:build long
 
-// This file verifies that the library can handle the full range of uint64 
-// for channel IDs across the wire, particularly focusing on Varint 
+// This file verifies that the library can handle the full range of uint64
+// for channel IDs across the wire, particularly focusing on Varint
 // encoding edge cases (e.g., 1-byte vs. 10-byte IDs).
 package multiplex
 
@@ -76,7 +76,7 @@ func TestMultiplex_LargeChannelIDs(t *testing.T) {
 
 			// Verify data can flow on this ID
 			testData := []byte(fmt.Sprintf("data-for-id-%d", id))
-			
+
 			go func() {
 				_ = clientCh.WriteMessage(testData)
 			}()
@@ -88,7 +88,7 @@ func TestMultiplex_LargeChannelIDs(t *testing.T) {
 			if !bytes.Equal(received, testData) {
 				t.Errorf("Data mismatch. Got %s, want %s", received, testData)
 			}
-			
+
 			// Clean up channel for next subtest
 			_ = clientCh.Close()
 		})

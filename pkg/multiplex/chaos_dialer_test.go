@@ -3,7 +3,7 @@
 
 //go:build long
 
-// This file implements a FaultInjectedConn and associated dialer to 
+// This file implements a FaultInjectedConn and associated dialer to
 
 // simulate network-level failures for chaos testing.
 package multiplex

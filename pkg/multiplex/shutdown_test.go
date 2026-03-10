@@ -3,7 +3,7 @@
 
 //go:build long
 
-// This file contains tests for connection shutdown scenarios, including 
+// This file contains tests for connection shutdown scenarios, including
 // graceful WebSocket closure and abrupt TCP-level disconnects.
 package multiplex
 
@@ -19,7 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// TestShutdown_Graceful verifies that calling Conn.Close() triggers a 
+// TestShutdown_Graceful verifies that calling Conn.Close() triggers a
 // proper WebSocket Close handshake and terminates the connection cleanly.
 func TestShutdown_Graceful(t *testing.T) {
 	upgrader := Upgrader{
@@ -81,8 +81,8 @@ func (l *connIntercept) Accept() (net.Conn, error) {
 	return c, err
 }
 
-// TestShutdown_Abrupt verifies that the library correctly handles 
-// sudden network-level disconnects (e.g., TCP reset) and returns 
+// TestShutdown_Abrupt verifies that the library correctly handles
+// sudden network-level disconnects (e.g., TCP reset) and returns
 // appropriate errors to active readers/writers.
 func TestShutdown_Abrupt(t *testing.T) {
 	captured := make(chan net.Conn, 1)
@@ -90,7 +90,7 @@ func TestShutdown_Abrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	intercept := &connIntercept{
 		Listener: ln,
 		captured: captured,
