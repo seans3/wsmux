@@ -34,8 +34,11 @@ type Upgrader struct {
 
 // Upgrade upgrades the HTTP server connection to the multiplexed protocol.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
-	u.Subprotocols = append(u.Subprotocols, protocol.ProtocolVersion)
-	c, err := u.Upgrader.Upgrade(w, r, responseHeader)
+	uCopy := u.Upgrader
+	uCopy.Subprotocols = append([]string(nil), u.Subprotocols...)
+	uCopy.Subprotocols = append(uCopy.Subprotocols, protocol.ProtocolVersion)
+
+	c, err := uCopy.Upgrade(w, r, responseHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +57,12 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	d.Subprotocols = append(d.Subprotocols, protocol.ProtocolVersion)
-	c, resp, err := d.Dialer.DialContext(ctx, url, requestHeader)
+	
+	dCopy := d.Dialer
+	dCopy.Subprotocols = append([]string(nil), d.Subprotocols...)
+	dCopy.Subprotocols = append(dCopy.Subprotocols, protocol.ProtocolVersion)
+
+	c, resp, err := dCopy.DialContext(ctx, url, requestHeader)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -467,8 +474,8 @@ func (ch *Channel) enqueueRead(data []byte) {
 
 	select {
 	case ch.readCh <- data:
-	default:
-		// Buffer full
+	case <-ch.conn.done:
+		// Connection closed, stop trying to deliver
 	}
 }
 
