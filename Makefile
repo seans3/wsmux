@@ -30,12 +30,16 @@ install:
 
 .PHONY: clean
 clean:
-	rm -f bin/ws-server
-	rm -f bin/ws-client
+	rm -rf bin
+	rm -f coverage.out
 
 .PHONY: test
 test:
 	go test -race -cover ./cmd/... ./pkg/...
+
+.PHONY: test-e2e
+test-e2e:
+	@echo "No e2e tests implemented yet."
 
 .PHONY: fmt
 fmt:
