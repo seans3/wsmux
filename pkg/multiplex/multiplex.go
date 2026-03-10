@@ -88,7 +88,8 @@ type Conn struct {
 	readTimeout  time.Duration
 
 	// done is closed when the connection is terminated
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewConn initializes a new multiplexed connection with default settings.
@@ -243,10 +244,7 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 }
 
 func (c *Conn) Close() error {
-	select {
-	case <-c.done:
-		return nil
-	default:
+	c.closeOnce.Do(func() {
 		// Send WebSocket CloseMessage gracefully via the write loop
 		select {
 		case c.writeCh <- writeMsg{
@@ -257,8 +255,8 @@ func (c *Conn) Close() error {
 		}
 		// Close done to stop ping loop and signal write loop to drain
 		close(c.done)
-		return nil
-	}
+	})
+	return nil
 }
 
 func (c *Conn) removeChannel(id uint64) {
@@ -279,6 +277,12 @@ func (c *Conn) SetChannelCreatedHandler(h func(*Channel) error) {
 func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	select {
+	case <-c.done:
+		return nil, io.ErrClosedPipe
+	default:
+	}
 
 	if _, ok := c.channels[id]; ok {
 		return nil, ErrChannelIDInUse
@@ -359,6 +363,12 @@ func (ch *Channel) WriteMessage(data []byte) error {
 		return io.ErrClosedPipe
 	}
 	ch.mu.Unlock()
+
+	select {
+	case <-ch.conn.done:
+		return io.ErrClosedPipe
+	default:
+	}
 
 	f := &protocol.Frame{
 		ChannelID: ch.id,
