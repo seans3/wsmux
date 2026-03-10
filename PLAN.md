@@ -51,13 +51,16 @@ To ensure high code quality and maintainability, all contributions must adhere t
 ### Milestone 5: Resilience & Idiomatic API
 - [x] Add Go Fuzz targets for `protocol.Decode`.
 - [x] Implement a `FaultInjectedConn` for chaos testing.
-- [ ] Implement **`io.Reader` and `io.Writer` interfaces** for `Channel`.
-    - Allows seamless integration with `io.Copy`, `bufio`, etc.
-- [ ] Add integration tests for "Dangling Channels" cleanup (when physical connection drops).
+- [x] Implement **`io.Reader` and `io.Writer` interfaces** for `Channel`.
+- [x] Add integration tests for "Dangling Channels" cleanup (abrupt disconnects).
+- [x] Implement comprehensive robustness tests (Large IDs, Malformed frames, Re-entry).
+- [x] Verify concurrency fairness between channels.
 
 ### Milestone 6: Advanced Protocol Features
-- [ ] Implement sub-protocol version negotiation improvements.
-- [ ] Add support for flow control (optional/future).
+- [x] Implement sub-protocol version negotiation improvements.
+- [ ] Implement **Flow Control & Back-pressure**.
+    - [ ] Define window-based or credit-based flow control mechanism.
+    - [ ] Prevent Head-of-Line (HoL) blocking when one channel's buffer is full.
 
 ### Milestone 7: Compelling Example Application
 - [ ] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
