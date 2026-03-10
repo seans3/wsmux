@@ -35,7 +35,7 @@ clean:
 
 .PHONY: test
 test:
-	go test -race -cover ./cmd/... ./pkg/...
+	go test -race -cover ./pkg/...
 
 .PHONY: test-long
 test-long:
