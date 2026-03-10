@@ -58,11 +58,25 @@ To ensure high code quality and maintainability, all contributions must adhere t
 
 ### Milestone 6: Per-Channel Flow Control (Window-Based)
 - [x] Design window-based flow control mechanism.
-- [ ] **Milestone 6.1:** Update `internal/protocol` with `FlagWindowUpdate` (0x05) and 4-byte payload encoding.
-- [ ] **Milestone 6.2:** Implement `SendWindow` in `Channel.Write()` with blocking logic using `sync.Cond`.
-- [ ] **Milestone 6.3:** Implement `RecvWindow` tracking and automatic `WindowUpdate` frame transmission.
-- [ ] **Milestone 6.4:** Resolve Head-of-Line (HoL) blocking by making `enqueueRead` non-blocking.
-- [ ] **Milestone 6.5:** Verify fix with `TestVerification_HoLBlocking` (it should now pass with high message counts).
+- [ ] **Milestone 6.1: Protocol Implementation**
+    - [ ] Update `internal/protocol` with `FlagWindowUpdate` (0x05).
+    - [ ] Implement 4-byte payload encoding/decoding for window increments.
+    - [ ] **Test:** Unit tests in `protocol_test.go` for new frame type.
+- [ ] **Milestone 6.2: Egress Flow Control**
+    - [ ] Implement `SendWindow` in `Channel.Write()`.
+    - [ ] Use `sync.Cond` to block writes when the window is zero.
+    - [ ] **Test:** Unit test with a mock receiver that doesn't send window updates.
+- [ ] **Milestone 6.3: Ingress Flow Control**
+    - [ ] Implement `RecvWindow` tracking in `Channel.Read()`.
+    - [ ] Automatically send `FlagWindowUpdate` frames when buffer space is freed.
+    - [ ] **Test:** "Long" test verifying window update frames are sent after `Read()`.
+- [ ] **Milestone 6.4: Resolution of HoL Blocking**
+    - [ ] Refactor `enqueueRead` to be non-blocking (or bounded by window).
+    - [ ] **Test (Automatic):** Run `TestVerification_HoLBlocking` (should now pass with high message counts).
+    - [ ] **Test (Manual):** Use `ws-rexec` to transfer a large file while running interactive commands on another channel.
+- [ ] **Milestone 6.5: Robustness**
+    - [ ] Handle protocol violations (peer sending more data than allowed).
+    - [ ] **Test:** Malformed input test for window-related violations.
 
 ### Milestone 7: Compelling Example Application
 - [x] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
