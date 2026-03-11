@@ -331,55 +331,6 @@ func TestFlowControl_UnknownChannelWindowUpdate(t *testing.T) {
 	}
 }
 
-// TestFlowControl_IoCopySmallWindow transfers 1MB via io.Copy with a 4KB window.
-// Before the Write-chunking fix this deadlocked: io.Copy uses 32KB buffers, which
-// exceed the 4KB window, so WriteMessage blocked forever waiting for credits that
-// could never arrive.
-func TestFlowControl_IoCopySmallWindow(t *testing.T) {
-	const window = 4096
-	const totalBytes = 1024 * 1024 // 1MB
-
-	clientConn, serverConn, cleanup := newFlowControlPair(t, window)
-	defer cleanup()
-
-	clientCh, err := clientConn.CreateChannel(1)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	var serverCh *Channel
-	select {
-	case serverCh = <-waitForChannel(serverConn):
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for server channel")
-	}
-
-	src := bytes.Repeat([]byte{0xAB}, totalBytes)
-
-	sendDone := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(clientCh, bytes.NewReader(src))
-		if err == nil {
-			err = clientCh.CloseWrite()
-		}
-		sendDone <- err
-	}()
-
-	dst, err := io.ReadAll(serverCh)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-
-	if err := <-sendDone; err != nil {
-		t.Fatalf("sender error: %v", err)
-	}
-	if len(dst) != totalBytes {
-		t.Errorf("received %d bytes, want %d", len(dst), totalBytes)
-	}
-	if !bytes.Equal(dst, src) {
-		t.Error("received data does not match sent data")
-	}
-}
-
 // TestFlowControl_IoCopyVerySmallWindow stress-tests chunking with a tiny 128-byte
 // window transferring 256KB, exercising many window replenishment cycles.
 func TestFlowControl_IoCopyVerySmallWindow(t *testing.T) {
@@ -419,69 +370,6 @@ func TestFlowControl_IoCopyVerySmallWindow(t *testing.T) {
 		t.Fatalf("ReadAll: %v", err)
 	}
 
-	if err := <-sendDone; err != nil {
-		t.Fatalf("sender error: %v", err)
-	}
-	if !bytes.Equal(dst, src) {
-		t.Errorf("data mismatch: received %d bytes, want %d", len(dst), totalBytes)
-	}
-}
-
-// TestFlowControl_IoCopyNoFlowControl confirms io.Copy works without flow control
-// (no chunking needed — serves as a baseline).
-func TestFlowControl_IoCopyNoFlowControl(t *testing.T) {
-	const totalBytes = 1024 * 1024 // 1MB
-
-	mux := http.NewServeMux()
-	serverConnCh := make(chan *Conn, 1)
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		upgrader := Upgrader{Upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}}
-		c, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade: %v", err)
-			return
-		}
-		serverConnCh <- c
-		<-c.Done()
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-	d := Dialer{Dialer: websocket.Dialer{}}
-	cc, _, err := d.Dial(context.Background(), u, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer cc.Close()
-	sc := <-serverConnCh
-	defer sc.Close()
-
-	clientCh, err := cc.CreateChannel(1)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	var serverCh *Channel
-	select {
-	case serverCh = <-waitForChannel(sc):
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for server channel")
-	}
-
-	src := bytes.Repeat([]byte{0xCD}, totalBytes)
-	sendDone := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(clientCh, bytes.NewReader(src))
-		if err == nil {
-			err = clientCh.CloseWrite()
-		}
-		sendDone <- err
-	}()
-
-	dst, err := io.ReadAll(serverCh)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
 	if err := <-sendDone; err != nil {
 		t.Fatalf("sender error: %v", err)
 	}

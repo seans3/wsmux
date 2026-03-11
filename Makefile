@@ -56,7 +56,7 @@ test-long:
 
 .PHONY: test-e2e
 test-e2e:
-	@echo "No e2e tests implemented yet."
+	go test -v -race -tags=e2e -timeout 60s ./test/e2e/...
 
 .PHONY: test-stress
 test-stress:
