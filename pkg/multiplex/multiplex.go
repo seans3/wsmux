@@ -653,6 +653,18 @@ func (ch *Channel) enqueueRead(data []byte) {
 		return
 	}
 
+	if ch.flowControl {
+		// With flow control the sender must respect the receiver's window, so
+		// readCh should never be full. Overflow means the peer violated the
+		// protocol; close the connection rather than blocking the readLoop.
+		select {
+		case ch.readCh <- data:
+		default:
+			ch.conn.Close()
+		}
+		return
+	}
+
 	select {
 	case ch.readCh <- data:
 	case <-ch.conn.done:
