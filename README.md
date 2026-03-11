@@ -89,6 +89,7 @@ upgrader := multiplex.Upgrader{
     ReadTimeout:       60 * time.Second,
     EnableFlowControl: true,   // optional; enables per-channel window-based flow control
     InitialWindow:     65536,  // optional; per-channel window in bytes (default 64KB)
+    MaxChannels:       256,    // optional; max concurrent channels (0 = unlimited)
 }
 conn, err := upgrader.Upgrade(w, r, responseHeader)
 ```
@@ -102,6 +103,7 @@ dialer := multiplex.Dialer{
     ReadTimeout:       60 * time.Second,
     EnableFlowControl: true,   // must match the server setting
     InitialWindow:     65536,
+    MaxChannels:       256,    // optional; enforced on outbound CreateChannel calls
 }
 conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
