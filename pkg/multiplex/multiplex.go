@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -372,6 +373,10 @@ type Channel struct {
 	sendMu     sync.Mutex
 	sendCond   *sync.Cond
 	sendWindow int64
+
+	// Ingress flow control: recvConsumed accumulates bytes consumed by Read/ReadMessage.
+	// When it crosses initialWindow/2, a WindowUpdate is sent to replenish the peer's window.
+	recvConsumed int64
 }
 
 func newChannel(id uint64, c *Conn) *Channel {
@@ -396,10 +401,13 @@ func (ch *Channel) Read(p []byte) (n int, err error) {
 		n = copy(p, ch.remainingBuf)
 		ch.remainingBuf = ch.remainingBuf[n:]
 		ch.mu.Unlock()
+		atomic.AddInt64(&ch.recvConsumed, int64(n))
+		ch.tryFlushRecvWindow()
 		return n, nil
 	}
 	ch.mu.Unlock()
 
+	// ReadMessage already accounts for recvConsumed on the full message.
 	data, err := ch.ReadMessage()
 	if err != nil {
 		return 0, err
@@ -430,6 +438,30 @@ func (ch *Channel) addSendWindow(n uint32) {
 	ch.sendWindow += int64(n)
 	ch.sendMu.Unlock()
 	ch.sendCond.Broadcast()
+}
+
+// tryFlushRecvWindow checks whether enough bytes have been consumed to warrant
+// sending a WindowUpdate to the peer. It fires once consumed bytes cross half
+// the initial window, then resets the counter.
+func (ch *Channel) tryFlushRecvWindow() {
+	if !ch.flowControl {
+		return
+	}
+	threshold := int64(ch.initialWindow) / 2
+	for {
+		consumed := atomic.LoadInt64(&ch.recvConsumed)
+		if consumed < threshold {
+			return
+		}
+		if atomic.CompareAndSwapInt64(&ch.recvConsumed, consumed, 0) {
+			frame := protocol.EncodeWindowUpdate(ch.id, uint32(consumed))
+			select {
+			case ch.conn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}:
+			case <-ch.conn.done:
+			}
+			return
+		}
+	}
 }
 
 // WriteMessage sends a message over the logical channel.
@@ -486,6 +518,8 @@ func (ch *Channel) ReadMessage() ([]byte, error) {
 		if !ok {
 			return nil, io.EOF
 		}
+		atomic.AddInt64(&ch.recvConsumed, int64(len(data)))
+		ch.tryFlushRecvWindow()
 		return data, nil
 	case <-ch.conn.done:
 		return nil, io.ErrUnexpectedEOF

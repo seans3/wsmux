@@ -8,6 +8,7 @@ package multiplex
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,6 +151,114 @@ func TestFlowControl_EgressBlocks(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("second WriteMessage did not unblock after WindowUpdate")
+	}
+}
+
+// TestFlowControl_WindowUpdateSent verifies that the receiver automatically sends
+// WindowUpdate frames as it consumes data, allowing a transfer that exceeds the
+// initial window to complete without deadlock.
+func TestFlowControl_WindowUpdateSent(t *testing.T) {
+	// Small window so we cross it quickly: 512 bytes.
+	// We will transfer 8KB total — 16x the window — which requires many WindowUpdates.
+	const window = 512
+	const totalBytes = 8 * 1024
+
+	clientConn, serverConn, cleanup := newFlowControlPair(t, window)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	var serverCh *Channel
+	select {
+	case serverCh = <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	// Sender: write totalBytes in 64-byte chunks.
+	sendDone := make(chan error, 1)
+	go func() {
+		chunk := make([]byte, 64)
+		for sent := 0; sent < totalBytes; sent += len(chunk) {
+			if err := clientCh.WriteMessage(chunk); err != nil {
+				sendDone <- err
+				return
+			}
+		}
+		sendDone <- clientCh.CloseWrite()
+	}()
+
+	// Receiver: read everything and count bytes.
+	var received int
+	for {
+		data, err := serverCh.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		received += len(data)
+	}
+
+	if err := <-sendDone; err != nil {
+		t.Fatalf("sender error: %v", err)
+	}
+	if received != totalBytes {
+		t.Errorf("received %d bytes, want %d", received, totalBytes)
+	}
+}
+
+// TestFlowControl_ContinuousStream transfers 1MB over a single channel with the
+// default window size to verify correctness at scale.
+func TestFlowControl_ContinuousStream(t *testing.T) {
+	const totalBytes = 1024 * 1024 // 1MB
+
+	clientConn, serverConn, cleanup := newFlowControlPair(t, 0 /* default 64KB */)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	var serverCh *Channel
+	select {
+	case serverCh = <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	sendDone := make(chan error, 1)
+	go func() {
+		chunk := make([]byte, 4096)
+		for sent := 0; sent < totalBytes; sent += len(chunk) {
+			if err := clientCh.WriteMessage(chunk); err != nil {
+				sendDone <- err
+				return
+			}
+		}
+		sendDone <- clientCh.CloseWrite()
+	}()
+
+	var received int
+	for {
+		data, err := serverCh.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		received += len(data)
+	}
+
+	if err := <-sendDone; err != nil {
+		t.Fatalf("sender error: %v", err)
+	}
+	if received != totalBytes {
+		t.Errorf("received %d bytes, want %d", received, totalBytes)
 	}
 }
 
