@@ -10,6 +10,7 @@ A robust Go library that extends [gorilla/websocket](https://github.com/gorilla/
 - **High-Performance Concurrency:** Serialized, non-blocking writes via a dedicated background goroutine and per-channel read buffering.
 - **Configurable Reliability:** Built-in Ping/Pong heartbeats and configurable I/O deadlines.
 - **Per-Channel Flow Control:** Optional window-based back-pressure prevents Head-of-Line blocking and protects slow readers from being overwhelmed.
+- **Structured Leveled Logging:** Optional `log/slog` integration. Silent by default; opt-in by supplying a logger. Zero overhead when disabled.
 
 ---
 
@@ -104,6 +105,36 @@ dialer := multiplex.Dialer{
 }
 conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
+
+### Logging
+
+The library is **silent by default**: if no `Logger` is set, all log output is discarded. To enable logging, pass a `*slog.Logger` to the `Upgrader` or `Dialer`:
+
+```go
+// Route through the application's default logger
+upgrader := multiplex.Upgrader{
+    Upgrader: websocket.Upgrader{...},
+    Logger:   slog.Default(),
+}
+
+// Or write debug output to stderr for local development
+upgrader := multiplex.Upgrader{
+    Upgrader: websocket.Upgrader{...},
+    Logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+        Level: slog.LevelDebug,
+    })),
+}
+```
+
+**Log levels and what they mean:**
+
+| Level | Events |
+|---|---|
+| `INFO` | Connection established (with config), connection closed |
+| `DEBUG` | Channel created (inbound/outbound), EOF sent/received, channel fully closed, send-window blocked, `WindowUpdate` sent/received |
+| `WARN` | Read/write errors, protocol violations (malformed frame, zero-increment `WindowUpdate`, duplicate `FlagCreate`, data for unknown channel), flow control buffer overflow |
+
+All log records are pre-annotated with `remote_addr`; channel-scoped records also include `channel_id`.
 
 ### Connection Management: `multiplex.Conn`
 - **`CreateChannel(id uint64)`**: Creates a new outbound logical channel.

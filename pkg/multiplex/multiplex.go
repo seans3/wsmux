@@ -57,8 +57,19 @@ type Upgrader struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
-	// Logger is used for structured leveled logging. If nil, all logging is
-	// suppressed. Use slog.Default() to route through the application logger.
+	// Logger enables structured leveled logging via log/slog. The library is
+	// silent by default: if Logger is nil, all output is discarded with zero
+	// overhead. Pass slog.Default() to route through the application logger,
+	// or a custom *slog.Logger to control level and destination independently.
+	//
+	// Log levels used by the library:
+	//   INFO  — connection established/closed
+	//   DEBUG — channel lifecycle (created, EOF, closed), flow control events
+	//           (window blocked, WindowUpdate sent/received)
+	//   WARN  — I/O errors, protocol violations, flow control buffer overflow
+	//
+	// All records are pre-annotated with "remote_addr"; channel-scoped records
+	// also include "channel_id".
 	Logger *slog.Logger
 }
 
@@ -90,8 +101,8 @@ type Dialer struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
-	// Logger is used for structured leveled logging. If nil, all logging is
-	// suppressed. Use slog.Default() to route through the application logger.
+	// Logger enables structured leveled logging. See Upgrader.Logger for the
+	// full description of levels, fields, and the silent-by-default policy.
 	Logger *slog.Logger
 }
 
