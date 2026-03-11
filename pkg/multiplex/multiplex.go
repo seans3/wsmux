@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -163,16 +164,6 @@ type Conn struct {
 	// done is closed when the connection is terminated
 	done      chan struct{}
 	closeOnce sync.Once
-}
-
-// NewConn initializes a new multiplexed connection with default settings.
-func NewConn(ws *websocket.Conn) *Conn {
-	return newConnInternal(ws, connConfig{})
-}
-
-// NewConnWithConfig initializes a new multiplexed connection with specific timeouts.
-func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Duration) *Conn {
-	return newConnInternal(ws, connConfig{pingInterval: pingInterval, readTimeout: readTimeout})
 }
 
 // noopLogger is a logger that discards all output. Used when no logger is configured.
@@ -353,6 +344,7 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 
 	if handler != nil {
 		if err := handler(newCh); err != nil {
+			c.logger.Warn("channel handler error, closing channel", "channel_id", f.ChannelID, "err", err)
 			newCh.Close()
 		}
 	}
@@ -550,8 +542,15 @@ func (ch *Channel) Write(p []byte) (n int, err error) {
 
 // addSendWindow increases the egress send window by n bytes and wakes any
 // blocked writers. Called when a FlagWindowUpdate frame is received from the peer.
+// Per RFC 7540 §6.9.1, overflow is a protocol error: the connection is closed.
 func (ch *Channel) addSendWindow(n uint32) {
 	ch.sendMu.Lock()
+	if ch.sendWindow > math.MaxInt64-int64(n) {
+		ch.sendMu.Unlock()
+		ch.logger.Warn("protocol violation: send window overflow")
+		ch.conn.Close()
+		return
+	}
 	ch.sendWindow += int64(n)
 	ch.sendMu.Unlock()
 	ch.sendCond.Broadcast()
