@@ -6,6 +6,7 @@ package multiplex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -88,7 +89,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 
 	c, err := uCopy.Upgrade(w, r, responseHeader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("multiplex: upgrade: %w", err)
 	}
 	return newConnInternal(c, connConfig{
 		pingInterval:  u.PingInterval,
@@ -129,7 +130,7 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 
 	c, resp, err := dCopy.DialContext(ctx, url, requestHeader)
 	if err != nil {
-		return nil, resp, err
+		return nil, resp, fmt.Errorf("multiplex: dial: %w", err)
 	}
 	return newConnInternal(c, connConfig{
 		pingInterval:  d.PingInterval,
