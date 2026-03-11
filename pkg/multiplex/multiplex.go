@@ -310,9 +310,11 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 			increment, err := protocol.DecodeWindowUpdate(f.Payload)
 			if err != nil || increment == 0 {
 				// Malformed or zero-increment window update is a protocol violation.
+				c.logger.Warn("protocol violation: malformed or zero-increment WindowUpdate", "channel_id", f.ChannelID)
 				c.Close()
 				return
 			}
+			ch.logger.Debug("WindowUpdate received", "increment", increment)
 			ch.addSendWindow(increment)
 		}
 		return
@@ -550,6 +552,7 @@ func (ch *Channel) tryFlushRecvWindow() {
 			return
 		}
 		if atomic.CompareAndSwapInt64(&ch.recvConsumed, consumed, 0) {
+			ch.logger.Debug("WindowUpdate sent", "increment", consumed)
 			frame := protocol.EncodeWindowUpdate(ch.id, uint32(consumed))
 			select {
 			case ch.conn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}:
@@ -578,6 +581,9 @@ func (ch *Channel) WriteMessage(data []byte) error {
 	// Egress flow control: block until there is enough send window.
 	if ch.flowControl {
 		ch.sendMu.Lock()
+		if ch.sendWindow < int64(len(data)) {
+			ch.logger.Debug("send window exhausted, blocking", "window", ch.sendWindow, "needed", len(data))
+		}
 		for ch.sendWindow < int64(len(data)) {
 			// Check if the connection was closed while we were waiting.
 			select {
@@ -719,6 +725,7 @@ func (ch *Channel) enqueueRead(data []byte) {
 		select {
 		case ch.readCh <- data:
 		default:
+			ch.logger.Warn("read buffer overflow: peer violated flow control window")
 			ch.conn.Close()
 		}
 		return
