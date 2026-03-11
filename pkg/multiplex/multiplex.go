@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,9 @@ type Upgrader struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
+	// Logger is used for structured leveled logging. If nil, all logging is
+	// suppressed. Use slog.Default() to route through the application logger.
+	Logger *slog.Logger
 }
 
 // Upgrade upgrades the HTTP server connection to the multiplexed protocol.
@@ -73,6 +77,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		readTimeout:   u.ReadTimeout,
 		flowControl:   u.EnableFlowControl,
 		initialWindow: u.InitialWindow,
+		logger:        u.Logger,
 	}), nil
 }
 
@@ -85,6 +90,9 @@ type Dialer struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
+	// Logger is used for structured leveled logging. If nil, all logging is
+	// suppressed. Use slog.Default() to route through the application logger.
+	Logger *slog.Logger
 }
 
 // Dial creates a new multiplexed connection to the specified URL.
@@ -106,6 +114,7 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 		readTimeout:   d.ReadTimeout,
 		flowControl:   d.EnableFlowControl,
 		initialWindow: d.InitialWindow,
+		logger:        d.Logger,
 	}), resp, nil
 }
 
@@ -115,6 +124,7 @@ type connConfig struct {
 	readTimeout   time.Duration
 	flowControl   bool
 	initialWindow uint32
+	logger        *slog.Logger
 }
 
 // writeMsg represents a message to be written to the physical websocket.
@@ -137,6 +147,8 @@ type Conn struct {
 	flowControl   bool
 	initialWindow uint32
 
+	logger *slog.Logger // never nil after construction
+
 	// done is closed when the connection is terminated
 	done      chan struct{}
 	closeOnce sync.Once
@@ -152,6 +164,9 @@ func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Durati
 	return newConnInternal(ws, connConfig{pingInterval: pingInterval, readTimeout: readTimeout})
 }
 
+// noopLogger is a logger that discards all output. Used when no logger is configured.
+var noopLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
 func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 	if cfg.pingInterval == 0 {
 		cfg.pingInterval = defaultPingInterval
@@ -162,6 +177,9 @@ func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 	if cfg.flowControl && cfg.initialWindow == 0 {
 		cfg.initialWindow = defaultInitialWindow
 	}
+	if cfg.logger == nil {
+		cfg.logger = noopLogger
+	}
 
 	c := &Conn{
 		ws:            ws,
@@ -171,6 +189,7 @@ func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 		readTimeout:   cfg.readTimeout,
 		flowControl:   cfg.flowControl,
 		initialWindow: cfg.initialWindow,
+		logger:        cfg.logger.With("remote_addr", ws.RemoteAddr()),
 		done:          make(chan struct{}),
 	}
 
@@ -388,6 +407,8 @@ type Channel struct {
 	flowControl   bool
 	initialWindow uint32
 
+	logger *slog.Logger // never nil; inherits remote_addr + channel_id from conn
+
 	// Egress flow control: sendWindow tracks how many bytes we may still send.
 	// Writes block on sendCond when sendWindow is exhausted.
 	sendMu     sync.Mutex
@@ -427,6 +448,7 @@ func newChannel(id uint64, c *Conn) *Channel {
 		readCh:        make(chan []byte, calcReadChCapacity(c.flowControl, c.initialWindow)),
 		flowControl:   c.flowControl,
 		initialWindow: c.initialWindow,
+		logger:        c.logger.With("channel_id", id),
 	}
 	ch.sendCond = sync.NewCond(&ch.sendMu)
 	if c.flowControl {
