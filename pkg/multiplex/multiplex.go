@@ -21,6 +21,26 @@ const (
 	defaultReadTimeout   = 60 * time.Second
 	defaultWriteTimeout  = 10 * time.Second
 	defaultInitialWindow = uint32(65536) // 64KB
+
+	// writeChCapacity is the number of outbound frames that can be queued
+	// before the centralized writer goroutine applies back-pressure.
+	writeChCapacity = 256
+
+	// readChCapacity is the per-channel inbound message buffer size when flow
+	// control is disabled.
+	readChCapacity = 64
+
+	// flowControlReadChMinCapacity and flowControlReadChMaxCapacity bound the
+	// per-channel inbound buffer when flow control is enabled. The byte window
+	// is the primary constraint; these limits prevent over-allocation for tiny
+	// windows and excessive allocation for very large ones.
+	flowControlReadChMinCapacity = 256
+	flowControlReadChMaxCapacity = 4096
+
+	// windowUpdateThresholdDivisor controls when the receiver sends a
+	// WindowUpdate. An update is sent once consumed bytes reach
+	// initialWindow / windowUpdateThresholdDivisor.
+	windowUpdateThresholdDivisor = 2
 )
 
 var (
@@ -145,7 +165,7 @@ func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 
 	c := &Conn{
 		ws:            ws,
-		writeCh:       make(chan writeMsg, 256),
+		writeCh:       make(chan writeMsg, writeChCapacity),
 		channels:      make(map[uint64]*Channel),
 		pingInterval:  cfg.pingInterval,
 		readTimeout:   cfg.readTimeout,
@@ -379,11 +399,32 @@ type Channel struct {
 	recvConsumed int64
 }
 
+// calcReadChCapacity returns the readCh buffer size for a channel.
+// With flow control the byte window is the primary bound, so we use a larger
+// message-level buffer to prevent false protocol-violation closures for small
+// messages. Without flow control the original capacity is preserved.
+func calcReadChCapacity(flowControl bool, initialWindow uint32) int {
+	if !flowControl {
+		return readChCapacity
+	}
+	// Allow at least one message per byte of window (very conservative lower
+	// bound), floored at flowControlReadChMinCapacity and capped at
+	// flowControlReadChMaxCapacity to keep memory reasonable.
+	n := int(initialWindow)
+	if n < flowControlReadChMinCapacity {
+		n = flowControlReadChMinCapacity
+	}
+	if n > flowControlReadChMaxCapacity {
+		n = flowControlReadChMaxCapacity
+	}
+	return n
+}
+
 func newChannel(id uint64, c *Conn) *Channel {
 	ch := &Channel{
 		id:            id,
 		conn:          c,
-		readCh:        make(chan []byte, 64),
+		readCh:        make(chan []byte, calcReadChCapacity(c.flowControl, c.initialWindow)),
 		flowControl:   c.flowControl,
 		initialWindow: c.initialWindow,
 	}
@@ -447,7 +488,7 @@ func (ch *Channel) tryFlushRecvWindow() {
 	if !ch.flowControl {
 		return
 	}
-	threshold := int64(ch.initialWindow) / 2
+	threshold := int64(ch.initialWindow) / windowUpdateThresholdDivisor
 	for {
 		consumed := atomic.LoadInt64(&ch.recvConsumed)
 		if consumed < threshold {
