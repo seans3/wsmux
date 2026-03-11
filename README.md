@@ -1,82 +1,147 @@
-# WebSockets Multiplexing Library
+# wsmux
 
-A robust Go library that extends [gorilla/websocket](https://github.com/gorilla/websocket) to provide a sophisticated multiplexing/demultiplexing interface. It allows multiple independent, logical streams (**Channels**) to coexist over a single persistent physical WebSocket connection, providing TCP-like semantics (including half-close EOF) for logical streams.
+**wsmux** multiplexes independent logical streams over a single WebSocket connection — giving you TCP-like channels with `io.Reader`/`io.Writer` semantics, window-based flow control, and EOF half-close, without managing multiple connections.
+
+---
+
+## Why wsmux?
+
+Opening a new WebSocket connection for every stream is expensive: each connection requires its own HTTP upgrade handshake, TLS negotiation, authentication round-trip, and OS-level socket. wsmux eliminates that overhead by running unlimited independent **Channels** over one persistent connection, each with its own lifecycle, back-pressure, and EOF signalling.
+
+**If you are building any of the following, wsmux is a natural fit:**
+
+- **Remote execution endpoint** — multiplex stdin, stdout, and stderr of a remote shell over a single authenticated WebSocket. This is the same pattern used by `kubectl exec` and SSH, built in ~100 lines of Go.
+- **Parallel request/response streams** — fan out concurrent RPC calls over one persistent connection without serializing them or managing connection pools.
+- **Large file or media transfer** — stream data to a slow reader with built-in window-based flow control; the sender blocks automatically rather than growing an unbounded buffer.
+
+---
+
+## Quick Start
+
+```go
+// SERVER — upgrade an HTTP request to a multiplexed connection
+upgrader := multiplex.Upgrader{
+    Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+}
+conn, err := upgrader.Upgrade(w, r, nil)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+// Handle channels opened by the client
+conn.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+    go func() {
+        io.Copy(ch, ch) // echo: pipe reads back as writes
+        ch.CloseWrite() // signal EOF to the client
+    }()
+    return nil
+})
+
+<-conn.Done()
+```
+
+```go
+// CLIENT — dial and open a logical channel
+dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
+conn, _, err := dialer.Dial(ctx, "ws://localhost:8080", nil)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+ch, err := conn.CreateChannel(1)
+if err != nil {
+    log.Fatal(err)
+}
+
+ch.Write([]byte("hello"))
+ch.CloseWrite() // done writing; server will receive io.EOF
+
+buf := make([]byte, 32)
+n, _ := ch.Read(buf)   // reads the echoed reply
+fmt.Println(string(buf[:n]))
+```
+
+`Channel` implements `io.Reader` and `io.Writer`, so it works with `io.Copy`, `bufio.Scanner`, `json.Decoder`, and any other standard library tool without adaptation.
+
+---
 
 ## Features
 
-- **Efficient Multiplexing:** Run unlimited logical streams over one physical connection using a lightweight binary protocol.
-- **Standard Library Integration:** `multiplex.Channel` implements `io.Reader` and `io.Writer`, enabling seamless use with `io.Copy`, `bufio`, and other standard tools.
-- **Robust Lifecycle Management:** Supports graceful handshake negotiation, half-close (EOF) propagation, and abrupt disconnect recovery.
-- **High-Performance Concurrency:** Serialized, non-blocking writes via a dedicated background goroutine and per-channel read buffering.
-- **Configurable Reliability:** Built-in Ping/Pong heartbeats and configurable I/O deadlines.
-- **Per-Channel Flow Control:** Optional window-based back-pressure prevents Head-of-Line blocking and protects slow readers from being overwhelmed.
-- **Structured Leveled Logging:** Optional `log/slog` integration. Silent by default; opt-in by supplying a logger. Zero overhead when disabled.
+- **Standard `io` interfaces** — every `Channel` is an `io.Reader` and `io.Writer`; drop it into any existing pipeline.
+- **Half-close EOF** — `CloseWrite()` signals the end of your upload while keeping the read side open for the server's response. Matches TCP semantics.
+- **Window-based flow control** — enable with `EnableFlowControl: true`. Slow readers get back-pressure instead of unbounded buffer growth; eliminates Head-of-Line blocking between channels.
+- **`MaxChannels` limit** — prevents channel-exhaustion DoS from untrusted peers. Set it on both sides.
+- **Built-in heartbeats** — configurable Ping/Pong with automatic read-deadline refresh keeps connections alive through proxies and NAT.
+- **Concurrent-write-safe** — all channels share one underlying connection; the library serializes writes internally so your code never needs a mutex.
+- **Zero-cost logging** — silent by default; opt in with any `*slog.Logger`.
 
 ---
 
-## Architecture & Design
+## Remote Execution Example
 
-### 1. Framing Protocol
-The library uses a custom binary framing format designed for minimal overhead:
-`[Varint ChannelID] [1-byte Flag] [Payload]`
+The `ws-rexec` example is the clearest demonstration of wsmux in practice. It multiplexes **stdin (ch 0)**, **stdout (ch 1)**, and **stderr (ch 2)** of a remote `bash` process over a single WebSocket connection, with correct EOF propagation on all three streams.
 
-- **ChannelID**: Variable-length integer (Base-128) supporting up to 64-bit IDs while remaining space-efficient for small IDs.
-- **Flags**:
-    - `0x01 (Data)`: Standard data payload.
-    - `0x02 (Create)`: Signal to open a new logical channel.
-    - `0x03 (Close)`: Immediate abort of a channel.
-    - `0x04 (EOF)`: Graceful half-close; no more data will be sent from this side.
-    - `0x05 (WindowUpdate)`: Flow control credit grant; 4-byte big-endian increment payload.
+**Client** (abbreviated from `cmd/ws-rexec-client/main.go`):
+```go
+conn, _, _ := dialer.Dial(ctx, "ws://localhost:8081/rexec", nil)
 
-### 2. Concurrency Model
-WebSocket connections in Gorilla are not thread-safe for concurrent writes. This library solves this by using a **centralized writer goroutine** per connection. All logical channels dispatch messages to a shared internal channel, ensuring strictly serialized access to the underlying WebSocket while allowing application-level writes to remain non-blocking until the global buffer is saturated.
+stdin,  _ := conn.CreateChannel(0)
+stdout, _ := conn.CreateChannel(1)
+stderr, _ := conn.CreateChannel(2)
 
-### 3. Lifecycle State Machine
-Each channel maintains an independent state machine allowing for "Half-Close" (EOF) support. This means a client can signal it is finished sending data (e.g., closing a file upload) while continuing to read a response from the server.
+go func() { io.Copy(stdin, os.Stdin);  stdin.CloseWrite() }()  // local stdin  → remote bash
+go func() { io.Copy(os.Stdout, stdout) }()                      // remote stdout → local stdout
+go func() { io.Copy(os.Stderr, stderr) }()                      // remote stderr → local stderr
 
----
+<-conn.Done()
+```
 
-## Getting Started
+**Server** (abbreviated from `cmd/ws-rexec-server/main.go`):
+```go
+conn, _ := upgrader.Upgrade(w, r, nil)
 
-### Installation
+conn.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
+    // collect the three channels by ID, then start bash
+    ...
+    cmd := exec.Command("bash")
+    io.Copy(cmdStdin,  stdin)   // mux channel → bash stdin
+    io.Copy(stdout, cmdStdout)  // bash stdout  → mux channel
+    io.Copy(stderr, cmdStderr)  // bash stderr  → mux channel
+    return nil
+})
+```
+
+**Build and run:**
 ```bash
 make build
-```
-This builds all example binaries into the `bin/` directory.
 
-### Example 1: Basic Echo
-A simple demonstration where every message sent by the client is echoed back by the server.
-
-**Start the Server:**
-```bash
-./bin/ws-server -addr localhost:8080
-```
-
-**Start the Client:**
-```bash
-./bin/ws-client -addr localhost:8080
-```
-
-### Example 2: Remote Execution (ws-rexec)
-A more advanced example that pipes `STDIN`, `STDOUT`, and `STDERR` to a remote shell (e.g., `bash`) over three independent logical channels.
-
-**Start the Rexec Server:**
-```bash
 ./bin/ws-rexec-server -addr localhost:8081
-```
 
-**Run a Command Remotely:**
-```bash
-# Interactive mode
+# interactive shell
 ./bin/ws-rexec-client -addr localhost:8081
 
-# Piped mode
+# piped command
 echo "uptime; exit" | ./bin/ws-rexec-client -addr localhost:8081
 ```
 
 ---
 
-## API Documentation
+## Installation
+
+```bash
+go get github.com/seans3/wsmux/pkg/multiplex
+```
+
+To build and run the bundled example binaries:
+```bash
+make build   # outputs to bin/
+```
+
+---
+
+## API Reference
 
 ### Connection Establishment
 
@@ -88,7 +153,7 @@ upgrader := multiplex.Upgrader{
     PingInterval:      30 * time.Second,
     ReadTimeout:       60 * time.Second,
     EnableFlowControl: true,   // optional; enables per-channel window-based flow control
-    InitialWindow:     65536,  // optional; per-channel window in bytes (default 64KB)
+    InitialWindow:     65536,  // optional; per-channel window in bytes (default 64 KB)
     MaxChannels:       256,    // optional; max concurrent channels (0 = unlimited)
 }
 conn, err := upgrader.Upgrade(w, r, responseHeader)
@@ -108,9 +173,24 @@ dialer := multiplex.Dialer{
 conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
 
+> **Note:** `EnableFlowControl` must match on both sides. If one side enables it and the other does not, frames will be misinterpreted and the connection will malfunction.
+
+### Connection Management: `multiplex.Conn`
+- **`CreateChannel(id uint64) (*Channel, error)`** — creates a new outbound logical channel. Returns `ErrChannelIDInUse` if the ID is already open, or `ErrTooManyChannels` if `MaxChannels` is exceeded.
+- **`SetChannelCreatedHandler(func(*Channel) error)`** — registers a callback invoked for each channel opened by the remote peer.
+- **`Close() error`** — gracefully closes the connection and all associated channels.
+- **`Done() <-chan struct{}`** — closed when the connection terminates; use to block until shutdown.
+
+### Logical Streams: `multiplex.Channel`
+- **`Read(p []byte) (n int, err error)`** — standard `io.Reader`.
+- **`Write(p []byte) (n int, err error)`** — standard `io.Writer`. Blocks when the flow control send window is exhausted.
+- **`CloseWrite() error`** — sends an EOF frame; the local side can no longer write, but can still read until the remote also closes.
+- **`Close() error`** — aborts the channel immediately and notifies the remote peer.
+- **`GetChannelID() uint64`** — returns the unique ID for this stream.
+
 ### Logging
 
-The library is **silent by default**: if no `Logger` is set, all log output is discarded. To enable logging, pass a `*slog.Logger` to the `Upgrader` or `Dialer`:
+The library is **silent by default**: if no `Logger` is set, all output is discarded with zero overhead. To enable logging, pass a `*slog.Logger` to `Upgrader` or `Dialer`:
 
 ```go
 // Route through the application's default logger
@@ -119,7 +199,7 @@ upgrader := multiplex.Upgrader{
     Logger:   slog.Default(),
 }
 
-// Or write debug output to stderr for local development
+// Write debug output to stderr for local development
 upgrader := multiplex.Upgrader{
     Upgrader: websocket.Upgrader{...},
     Logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -128,7 +208,7 @@ upgrader := multiplex.Upgrader{
 }
 ```
 
-**Log levels and what they mean:**
+**Log levels:**
 
 | Level | Events |
 |---|---|
@@ -138,47 +218,62 @@ upgrader := multiplex.Upgrader{
 
 All log records are pre-annotated with `remote_addr`; channel-scoped records also include `channel_id`.
 
-### Connection Management: `multiplex.Conn`
-- **`CreateChannel(id uint64)`**: Creates a new outbound logical channel.
-- **`SetChannelCreatedHandler(handler)`**: Registers a callback for incoming remote channels.
-- **`Close()`**: Gracefully closes the connection and all associated channels.
-- **`Done()`**: Returns a channel that closes when the connection terminates.
+### Production Checklist
 
-### Logical Streams: `multiplex.Channel`
-- **`Read(p []byte)` / `Write(p []byte)`**: Standard `io` interfaces.
-- **`CloseWrite()`**: Sends an EOF frame. Local side is done writing; remote side will receive `io.EOF`.
-- **`GetChannelID()`**: Returns the unique ID for this stream.
+Before deploying to untrusted peers:
+- Set `MaxChannels` to bound memory usage per connection (e.g. `256`).
+- Enable `EnableFlowControl` to prevent a fast sender from overwhelming a slow reader — and ensure both sides use the same setting.
+
+---
+
+## Architecture & Wire Protocol
+
+*This section is for contributors and the curious. You do not need to understand it to use wsmux.*
+
+### Framing Protocol
+Each frame: `[Varint ChannelID][1-byte Flag][Payload]`
+
+- **ChannelID**: Base-128 varint supporting up to 64-bit IDs, space-efficient for small values.
+- **Flags**: `0x01 Data` · `0x02 Create` · `0x03 Close` · `0x04 EOF` · `0x05 WindowUpdate` (4-byte big-endian increment payload)
+
+### Concurrency Model
+gorilla/websocket is not concurrent-write-safe. wsmux solves this with a **centralized `writeLoop` goroutine** per connection. All channels enqueue frames to a shared `writeCh`; the write loop serializes them onto the underlying socket. Application-level writes remain non-blocking until the global queue (`writeChCapacity = 256` frames) is saturated.
+
+Three goroutines run per `Conn`: `writeLoop`, `readLoop`, `pingLoop`.
+
+### Channel Lifecycle
+Each `Channel` tracks independent half-close state (`localClosed`, `remoteClosed`). `CloseWrite()` sends `FlagEOF` and marks the local side done while leaving the read side open. `Close()` sends `FlagClose` and aborts both directions.
 
 ---
 
 ## Testing & Verification
 
-The project has four test suites organized by scope and execution time:
+The project has four test suites organized by scope:
 
 ### 1. Unit Tests (`make test`)
-Fast verification of core logic — framing, channel lifecycle, flow control mechanics, protocol edge cases. Runs with the race detector. No build tag required.
+Fast verification of core logic — framing, channel lifecycle, flow control mechanics, protocol edge cases. Runs with the race detector.
 ```bash
 make test
 ```
 
 ### 2. Integration Tests (`make test-long`, `make test-stress`)
-Located in `test/integration/`. These tests exercise the full public API against a real in-process WebSocket server.
+Located in `test/integration/`. Exercise the full public API against a real in-process WebSocket server.
 
-- **Long tests** (`//go:build long`): Resource leak detection, chaos/fault-injection testing, heartbeat and read-timeout behaviour, graceful and abrupt shutdown, Head-of-Line blocking verification (with and without flow control), channel fairness under flood conditions, and malformed-frame resilience.
-- **Stress tests** (`//go:build stress`): High-load concurrency across 20+ channels, cross-channel relay, rapid channel open/close cycles, and multiple parallel connections. Every stress test runs twice — once without flow control and once with — to catch regressions in both modes.
+- **Long tests** (`//go:build long`): resource leak detection, chaos/fault-injection, heartbeat and read-timeout behaviour, graceful and abrupt shutdown, Head-of-Line blocking verification, channel fairness under flood conditions, and malformed-frame resilience.
+- **Stress tests** (`//go:build stress`): high-load concurrency across 20+ channels, cross-channel relay, rapid open/close cycles, multiple parallel connections. Every stress test runs twice — with and without flow control.
 
 ```bash
-make test-long    # runs pkg/multiplex and test/integration (long tag)
-make test-stress  # runs test/integration (stress tag)
+make test-long
+make test-stress
 ```
 
 ### 3. End-to-End Tests (`make test-e2e`)
-Located in `test/e2e/`. These tests compile and run the `ws-file-server` and `ws-file-client` binaries as real OS processes, transfer a 10 MB random file over a live WebSocket connection, and verify the received bytes are identical to what was sent. Three scenarios are covered:
+Compile and run `ws-file-server` and `ws-file-client` as real OS processes, transfer a 10 MB random file over a live WebSocket connection, and verify byte-for-byte integrity.
 
 | Test | Flow Control | Window | Window Cycles |
 |---|---|---|---|
 | `NoFlowControl` | off | — | — |
-| `FlowControlDefaultWindow` | on | 64 KB (default) | ~160 |
+| `FlowControlDefaultWindow` | on | 64 KB | ~160 |
 | `FlowControl4KWindow` | on | 4 KB | ~2,560 |
 
 ```bash
@@ -190,11 +285,18 @@ make test-e2e
 make test-all
 ```
 
+---
+
 ## Roadmap
 
-All planned milestones are complete:
-- [x] **Flow Control & Back-pressure**: Window-based per-channel flow control implemented behind `EnableFlowControl` feature gate. Eliminates Head-of-Line blocking.
-- [x] **Robustness Testing**: Comprehensive suite for large IDs, malformed frames, and flow control protocol violations.
-- [x] **Remote Execution Example**: `ws-rexec` multiplexes stdin/stdout/stderr over three independent channels.
+All planned features are implemented and tested:
 
-See [PLAN.md](PLAN.md) for the detailed implementation roadmap.
+- **Multiplexing core** — binary framing, varint channel IDs, concurrent read/write
+- **Half-close EOF** — `CloseWrite()` with independent per-direction state
+- **Flow control** — window-based per-channel back-pressure behind `EnableFlowControl`
+- **`MaxChannels` limit** — DoS protection against channel exhaustion
+- **Heartbeats** — configurable Ping/Pong with read-deadline refresh
+- **Structured logging** — `log/slog` integration, silent by default
+- **Remote execution example** — `ws-rexec` multiplexes stdin/stdout/stderr over three channels
+
+See [PLAN.md](PLAN.md) for the detailed implementation history.
