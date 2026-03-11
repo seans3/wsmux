@@ -9,6 +9,7 @@ A robust Go library that extends [gorilla/websocket](https://github.com/gorilla/
 - **Robust Lifecycle Management:** Supports graceful handshake negotiation, half-close (EOF) propagation, and abrupt disconnect recovery.
 - **High-Performance Concurrency:** Serialized, non-blocking writes via a dedicated background goroutine and per-channel read buffering.
 - **Configurable Reliability:** Built-in Ping/Pong heartbeats and configurable I/O deadlines.
+- **Per-Channel Flow Control:** Optional window-based back-pressure prevents Head-of-Line blocking and protects slow readers from being overwhelmed.
 
 ---
 
@@ -24,6 +25,7 @@ The library uses a custom binary framing format designed for minimal overhead:
     - `0x02 (Create)`: Signal to open a new logical channel.
     - `0x03 (Close)`: Immediate abort of a channel.
     - `0x04 (EOF)`: Graceful half-close; no more data will be sent from this side.
+    - `0x05 (WindowUpdate)`: Flow control credit grant; 4-byte big-endian increment payload.
 
 ### 2. Concurrency Model
 WebSocket connections in Gorilla are not thread-safe for concurrent writes. This library solves this by using a **centralized writer goroutine** per connection. All logical channels dispatch messages to a shared internal channel, ensuring strictly serialized access to the underlying WebSocket while allowing application-level writes to remain non-blocking until the global buffer is saturated.
@@ -81,9 +83,11 @@ echo "uptime; exit" | ./bin/ws-rexec-client -addr localhost:8081
 Wraps `websocket.Upgrader` to handle the multiplexing handshake.
 ```go
 upgrader := multiplex.Upgrader{
-    Upgrader: websocket.Upgrader{...},
-    PingInterval: 30 * time.Second,
-    ReadTimeout:  60 * time.Second,
+    Upgrader:          websocket.Upgrader{...},
+    PingInterval:      30 * time.Second,
+    ReadTimeout:       60 * time.Second,
+    EnableFlowControl: true,   // optional; enables per-channel window-based flow control
+    InitialWindow:     65536,  // optional; per-channel window in bytes (default 64KB)
 }
 conn, err := upgrader.Upgrade(w, r, responseHeader)
 ```
@@ -92,9 +96,11 @@ conn, err := upgrader.Upgrade(w, r, responseHeader)
 Wraps `websocket.Dialer` to connect to a multiplexed server.
 ```go
 dialer := multiplex.Dialer{
-    Dialer: websocket.Dialer{...},
-    PingInterval: 30 * time.Second,
-    ReadTimeout:  60 * time.Second,
+    Dialer:            websocket.Dialer{...},
+    PingInterval:      30 * time.Second,
+    ReadTimeout:       60 * time.Second,
+    EnableFlowControl: true,   // must match the server setting
+    InitialWindow:     65536,
 }
 conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 ```
@@ -117,7 +123,7 @@ conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 The project includes three distinct test suites:
 1. **Unit Tests:** Fast verification of core logic (`make test`).
 2. **Long Tests:** Resource leak analysis, chaos testing, and stability checks (`make test-long`).
-3. **Stress Tests:** High-load concurrency and data integrity validation (`make stress`).
+3. **Stress Tests:** High-load concurrency and data integrity validation (`make test-stress`).
 
 To run the full suite:
 ```bash
@@ -126,9 +132,9 @@ make test-all
 
 ## Roadmap
 
-The project is under active development. Current priorities include:
-- [ ] **Flow Control & Back-pressure**: Implementing window-based flow control to prevent Head-of-Line blocking.
-- [x] **Robustness Testing**: Completed comprehensive suite for large IDs and malformed frames.
-- [x] **Remote Execution Example**: Completed implementation of `ws-rexec`.
+All planned milestones are complete:
+- [x] **Flow Control & Back-pressure**: Window-based per-channel flow control implemented behind `EnableFlowControl` feature gate. Eliminates Head-of-Line blocking.
+- [x] **Robustness Testing**: Comprehensive suite for large IDs, malformed frames, and flow control protocol violations.
+- [x] **Remote Execution Example**: `ws-rexec` multiplexes stdin/stdout/stderr over three independent channels.
 
 See [PLAN.md](PLAN.md) for the detailed implementation roadmap.

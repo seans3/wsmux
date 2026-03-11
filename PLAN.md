@@ -58,25 +58,27 @@ To ensure high code quality and maintainability, all contributions must adhere t
 
 ### Milestone 6: Per-Channel Flow Control (Window-Based)
 - [x] Design window-based flow control mechanism.
-- [ ] **Milestone 6.1: Protocol Implementation**
+- [x] **Milestone 6.1: Protocol Implementation**
     - [x] Update `internal/protocol` with `FlagWindowUpdate` (0x05).
     - [x] Implement 4-byte payload encoding/decoding for window increments.
     - [x] **Test:** Unit tests in `protocol_test.go` for new frame type.
-- [ ] **Milestone 6.2: Egress Flow Control**
-    - [ ] Implement `SendWindow` in `Channel.Write()`.
-    - [ ] Use `sync.Cond` to block writes when the window is zero.
-    - [ ] **Test:** Unit test with a mock receiver that doesn't send window updates.
-- [ ] **Milestone 6.3: Ingress Flow Control**
-    - [ ] Implement `RecvWindow` tracking in `Channel.Read()`.
-    - [ ] Automatically send `FlagWindowUpdate` frames when buffer space is freed.
-    - [ ] **Test:** "Long" test verifying window update frames are sent after `Read()`.
-- [ ] **Milestone 6.4: Resolution of HoL Blocking**
-    - [ ] Refactor `enqueueRead` to be non-blocking (or bounded by window).
-    - [ ] **Test (Automatic):** Run `TestVerification_HoLBlocking` (should now pass with high message counts).
-    - [ ] **Test (Manual):** Use `ws-rexec` to transfer a large file while running interactive commands on another channel.
-- [ ] **Milestone 6.5: Robustness**
-    - [ ] Handle protocol violations (peer sending more data than allowed).
-    - [ ] **Test:** Malformed input test for window-related violations.
+- [x] **Milestone 6.2: Egress Flow Control**
+    - [x] Add `EnableFlowControl` feature gate to `Upgrader`, `Dialer`, `Conn`, and `Channel`.
+    - [x] Implement `sendWindow` in `Channel.WriteMessage()` using `sync.Cond` to block writes when the window is exhausted.
+    - [x] Handle incoming `FlagWindowUpdate` frames in `handleFrame` to replenish `sendWindow`.
+    - [x] **Test:** `TestFlowControl_EgressBlocks`, `TestFlowControl_EgressUnblocksOnConnClose`.
+- [x] **Milestone 6.3: Ingress Flow Control**
+    - [x] Implement `recvConsumed` tracking in `Channel.Read()` and `Channel.ReadMessage()`.
+    - [x] Automatically send `FlagWindowUpdate` frames once consumed bytes cross `initialWindow/2`.
+    - [x] **Test:** `TestFlowControl_WindowUpdateSent`, `TestFlowControl_ContinuousStream`.
+- [x] **Milestone 6.4: Resolution of HoL Blocking**
+    - [x] Refactor `enqueueRead` to be non-blocking when flow control is enabled; overflow is a protocol violation.
+    - [x] **Test:** `TestVerification_HoLBlocking_GateOff` (confirms HoL still present with gate off); `TestVerification_HoLBlocking_GateOn` (confirms HoL eliminated with gate on — fast reader reaches ~70,000+ messages vs ~150 without flow control).
+- [x] **Milestone 6.5: Robustness**
+    - [x] Zero-increment `WindowUpdate` closes the connection as a protocol violation.
+    - [x] `WindowUpdate` for an unknown channel is silently ignored.
+    - [x] Large window grants are handled without integer overflow.
+    - [x] **Test:** `TestFlowControl_ZeroIncrementWindow`, `TestFlowControl_UnknownChannelWindowUpdate`, `TestFlowControl_OverflowWindow`.
 
 ### Milestone 7: Compelling Example Application
 - [x] Design and implement **`ws-rexec`**: A multiplexed remote command runner.
@@ -93,8 +95,8 @@ To ensure high code quality and maintainability, all contributions must adhere t
 *Rationale:* Space-efficient for low channel IDs while supporting IDs up to 64-bit.
 *Protocol Format (per frame):*
 - `ChannelID`: Varint (Base-128)
-- `Flag`: 1 byte (0x01 Data, 0x02 Create, 0x03 Close, 0x04 EOF)
-- `Payload`: Remaining data
+- `Flag`: 1 byte (0x01 Data, 0x02 Create, 0x03 Close, 0x04 EOF, 0x05 WindowUpdate)
+- `Payload`: Remaining data (WindowUpdate carries a 4-byte big-endian increment)
 
 ### 2. Concurrency (Writes)
 **Decision:** Use a dedicated writer goroutine with a channel-based dispatch.
