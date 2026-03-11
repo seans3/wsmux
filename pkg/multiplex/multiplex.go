@@ -342,21 +342,18 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 		return
 	}
 
-	// Check if it's a create request.
-	if f.Flag == protocol.FlagCreate {
-		// New inbound channel
-		newCh := newChannel(f.ChannelID, c)
-		c.mu.Lock()
-		c.channels[f.ChannelID] = newCh
-		handler := c.onChannelCreated
-		c.mu.Unlock()
+	// New inbound channel.
+	newCh := newChannel(f.ChannelID, c)
+	c.mu.Lock()
+	c.channels[f.ChannelID] = newCh
+	handler := c.onChannelCreated
+	c.mu.Unlock()
 
-		c.logger.Debug("channel created (inbound)", "channel_id", f.ChannelID)
+	c.logger.Debug("channel created (inbound)", "channel_id", f.ChannelID)
 
-		if handler != nil {
-			if err := handler(newCh); err != nil {
-				newCh.Close()
-			}
+	if handler != nil {
+		if err := handler(newCh); err != nil {
+			newCh.Close()
 		}
 	}
 }
