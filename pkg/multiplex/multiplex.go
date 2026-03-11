@@ -46,7 +46,8 @@ const (
 )
 
 var (
-	ErrChannelIDInUse = errors.New("multiplex: channel ID already in use")
+	ErrChannelIDInUse  = errors.New("multiplex: channel ID already in use")
+	ErrTooManyChannels = errors.New("multiplex: max concurrent channels reached")
 )
 
 // Upgrader wraps gorilla.Upgrader to support multiplexed connections.
@@ -58,6 +59,11 @@ type Upgrader struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
+	// MaxChannels limits the number of concurrently open logical channels on a
+	// single connection. Inbound FlagCreate frames that would exceed this limit
+	// are rejected and the connection is closed. Zero means no limit (default),
+	// which is only appropriate for trusted peers.
+	MaxChannels uint32
 	// Logger enables structured leveled logging via log/slog. The library is
 	// silent by default: if Logger is nil, all output is discarded with zero
 	// overhead. Pass slog.Default() to route through the application logger,
@@ -89,6 +95,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		readTimeout:   u.ReadTimeout,
 		flowControl:   u.EnableFlowControl,
 		initialWindow: u.InitialWindow,
+		maxChannels:   u.MaxChannels,
 		logger:        u.Logger,
 	}), nil
 }
@@ -102,6 +109,9 @@ type Dialer struct {
 	// InitialWindow sets the per-channel flow control window in bytes.
 	// Only used when EnableFlowControl is true. Defaults to 64KB.
 	InitialWindow uint32
+	// MaxChannels limits the number of concurrently open logical channels.
+	// See Upgrader.MaxChannels for full details.
+	MaxChannels uint32
 	// Logger enables structured leveled logging. See Upgrader.Logger for the
 	// full description of levels, fields, and the silent-by-default policy.
 	Logger *slog.Logger
@@ -126,6 +136,7 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 		readTimeout:   d.ReadTimeout,
 		flowControl:   d.EnableFlowControl,
 		initialWindow: d.InitialWindow,
+		maxChannels:   d.MaxChannels,
 		logger:        d.Logger,
 	}), resp, nil
 }
@@ -136,6 +147,7 @@ type connConfig struct {
 	readTimeout   time.Duration
 	flowControl   bool
 	initialWindow uint32
+	maxChannels   uint32
 	logger        *slog.Logger
 }
 
@@ -158,6 +170,7 @@ type Conn struct {
 	readTimeout   time.Duration
 	flowControl   bool
 	initialWindow uint32
+	maxChannels   uint32 // 0 = unlimited
 
 	logger *slog.Logger // never nil after construction
 
@@ -191,6 +204,7 @@ func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 		readTimeout:   cfg.readTimeout,
 		flowControl:   cfg.flowControl,
 		initialWindow: cfg.initialWindow,
+		maxChannels:   cfg.maxChannels,
 		logger:        cfg.logger.With("remote_addr", ws.RemoteAddr()),
 		done:          make(chan struct{}),
 	}
@@ -334,8 +348,14 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 	}
 
 	// New inbound channel.
-	newCh := newChannel(f.ChannelID, c)
 	c.mu.Lock()
+	if c.maxChannels > 0 && uint32(len(c.channels)) >= c.maxChannels {
+		c.mu.Unlock()
+		c.logger.Warn("max channels exceeded, closing connection", "channel_id", f.ChannelID, "max", c.maxChannels)
+		c.Close()
+		return
+	}
+	newCh := newChannel(f.ChannelID, c)
 	c.channels[f.ChannelID] = newCh
 	handler := c.onChannelCreated
 	c.mu.Unlock()
@@ -399,6 +419,10 @@ func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 
 	if _, ok := c.channels[id]; ok {
 		return nil, ErrChannelIDInUse
+	}
+
+	if c.maxChannels > 0 && uint32(len(c.channels)) >= c.maxChannels {
+		return nil, ErrTooManyChannels
 	}
 
 	ch := newChannel(id, c)
