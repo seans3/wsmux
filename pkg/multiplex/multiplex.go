@@ -327,6 +327,8 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 		handler := c.onChannelCreated
 		c.mu.Unlock()
 
+		c.logger.Debug("channel created (inbound)", "channel_id", f.ChannelID)
+
 		if handler != nil {
 			if err := handler(newCh); err != nil {
 				newCh.Close()
@@ -396,6 +398,7 @@ func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 	}
 	c.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: f.Encode()}
 
+	c.logger.Debug("channel created (outbound)", "channel_id", id)
 	return ch, nil
 }
 
@@ -637,6 +640,7 @@ func (ch *Channel) CloseWrite() error {
 
 	select {
 	case ch.conn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: f.Encode()}:
+		ch.logger.Debug("EOF sent (CloseWrite)")
 		ch.maybeCleanup()
 		return nil
 	case <-ch.conn.done:
@@ -666,6 +670,7 @@ func (ch *Channel) abort() {
 	ch.remoteClosed = true
 	ch.mu.Unlock()
 
+	ch.logger.Debug("channel aborted")
 	// Wake any writer blocked on the send window so it can observe the closed state.
 	ch.sendCond.Broadcast()
 	ch.closeReadChannel()
@@ -677,6 +682,7 @@ func (ch *Channel) markRemoteClosed() {
 	ch.remoteClosed = true
 	ch.mu.Unlock()
 
+	ch.logger.Debug("EOF received")
 	ch.closeReadChannel()
 	ch.maybeCleanup()
 }
@@ -693,6 +699,7 @@ func (ch *Channel) maybeCleanup() {
 	ch.mu.Unlock()
 
 	if done {
+		ch.logger.Debug("channel fully closed")
 		ch.conn.removeChannel(ch.id)
 	}
 }

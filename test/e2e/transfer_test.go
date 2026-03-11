@@ -180,7 +180,7 @@ func TestE2E_FileTransfer_FlowControlDefaultWindow(t *testing.T) {
 // replenishment cycles to deliver 10MB, strongly exercising the backpressure path.
 func TestE2E_FileTransfer_FlowControl4KWindow(t *testing.T) {
 	const size = 10 * 1024 * 1024 // 10MB
-	const window = "4096"          // 4KB — far smaller than io.Copy's 32KB buffer
+	const window = "4096"         // 4KB — far smaller than io.Copy's 32KB buffer
 
 	src := make([]byte, size)
 	if _, err := rand.Read(src); err != nil {
