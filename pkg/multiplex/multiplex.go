@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	defaultPingInterval = 30 * time.Second
-	defaultReadTimeout  = 60 * time.Second
-	defaultWriteTimeout = 10 * time.Second
+	defaultPingInterval  = 30 * time.Second
+	defaultReadTimeout   = 60 * time.Second
+	defaultWriteTimeout  = 10 * time.Second
+	defaultInitialWindow = uint32(65536) // 64KB
 )
 
 var (
@@ -28,8 +29,12 @@ var (
 // Upgrader wraps gorilla.Upgrader to support multiplexed connections.
 type Upgrader struct {
 	websocket.Upgrader
-	PingInterval time.Duration
-	ReadTimeout  time.Duration
+	PingInterval      time.Duration
+	ReadTimeout       time.Duration
+	EnableFlowControl bool
+	// InitialWindow sets the per-channel flow control window in bytes.
+	// Only used when EnableFlowControl is true. Defaults to 64KB.
+	InitialWindow uint32
 }
 
 // Upgrade upgrades the HTTP server connection to the multiplexed protocol.
@@ -42,14 +47,23 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	if err != nil {
 		return nil, err
 	}
-	return NewConnWithConfig(c, u.PingInterval, u.ReadTimeout), nil
+	return newConnInternal(c, connConfig{
+		pingInterval:  u.PingInterval,
+		readTimeout:   u.ReadTimeout,
+		flowControl:   u.EnableFlowControl,
+		initialWindow: u.InitialWindow,
+	}), nil
 }
 
 // Dialer wraps gorilla.Dialer to support multiplexed connections.
 type Dialer struct {
 	websocket.Dialer
-	PingInterval time.Duration
-	ReadTimeout  time.Duration
+	PingInterval      time.Duration
+	ReadTimeout       time.Duration
+	EnableFlowControl bool
+	// InitialWindow sets the per-channel flow control window in bytes.
+	// Only used when EnableFlowControl is true. Defaults to 64KB.
+	InitialWindow uint32
 }
 
 // Dial creates a new multiplexed connection to the specified URL.
@@ -66,7 +80,20 @@ func (d *Dialer) Dial(ctx context.Context, url string, requestHeader http.Header
 	if err != nil {
 		return nil, resp, err
 	}
-	return NewConnWithConfig(c, d.PingInterval, d.ReadTimeout), resp, nil
+	return newConnInternal(c, connConfig{
+		pingInterval:  d.PingInterval,
+		readTimeout:   d.ReadTimeout,
+		flowControl:   d.EnableFlowControl,
+		initialWindow: d.InitialWindow,
+	}), resp, nil
+}
+
+// connConfig holds internal configuration for a Conn.
+type connConfig struct {
+	pingInterval  time.Duration
+	readTimeout   time.Duration
+	flowControl   bool
+	initialWindow uint32
 }
 
 // writeMsg represents a message to be written to the physical websocket.
@@ -84,8 +111,10 @@ type Conn struct {
 
 	onChannelCreated func(*Channel) error
 
-	pingInterval time.Duration
-	readTimeout  time.Duration
+	pingInterval  time.Duration
+	readTimeout   time.Duration
+	flowControl   bool
+	initialWindow uint32
 
 	// done is closed when the connection is terminated
 	done      chan struct{}
@@ -94,25 +123,34 @@ type Conn struct {
 
 // NewConn initializes a new multiplexed connection with default settings.
 func NewConn(ws *websocket.Conn) *Conn {
-	return NewConnWithConfig(ws, 0, 0)
+	return newConnInternal(ws, connConfig{})
 }
 
 // NewConnWithConfig initializes a new multiplexed connection with specific timeouts.
 func NewConnWithConfig(ws *websocket.Conn, pingInterval, readTimeout time.Duration) *Conn {
-	if pingInterval == 0 {
-		pingInterval = defaultPingInterval
+	return newConnInternal(ws, connConfig{pingInterval: pingInterval, readTimeout: readTimeout})
+}
+
+func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
+	if cfg.pingInterval == 0 {
+		cfg.pingInterval = defaultPingInterval
 	}
-	if readTimeout == 0 {
-		readTimeout = defaultReadTimeout
+	if cfg.readTimeout == 0 {
+		cfg.readTimeout = defaultReadTimeout
+	}
+	if cfg.flowControl && cfg.initialWindow == 0 {
+		cfg.initialWindow = defaultInitialWindow
 	}
 
 	c := &Conn{
-		ws:           ws,
-		writeCh:      make(chan writeMsg, 256),
-		channels:     make(map[uint64]*Channel),
-		pingInterval: pingInterval,
-		readTimeout:  readTimeout,
-		done:         make(chan struct{}),
+		ws:            ws,
+		writeCh:       make(chan writeMsg, 256),
+		channels:      make(map[uint64]*Channel),
+		pingInterval:  cfg.pingInterval,
+		readTimeout:   cfg.readTimeout,
+		flowControl:   cfg.flowControl,
+		initialWindow: cfg.initialWindow,
+		done:          make(chan struct{}),
 	}
 
 	_ = c.ws.SetReadDeadline(time.Now().Add(c.readTimeout))
@@ -226,9 +264,11 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 	if f.Flag == protocol.FlagCreate {
 		// New inbound channel
 		newCh := &Channel{
-			id:     f.ChannelID,
-			conn:   c,
-			readCh: make(chan []byte, 64),
+			id:            f.ChannelID,
+			conn:          c,
+			readCh:        make(chan []byte, 64),
+			flowControl:   c.flowControl,
+			initialWindow: c.initialWindow,
 		}
 		c.mu.Lock()
 		c.channels[f.ChannelID] = newCh
@@ -289,9 +329,11 @@ func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 	}
 
 	ch := &Channel{
-		id:     id,
-		conn:   c,
-		readCh: make(chan []byte, 64),
+		id:            id,
+		conn:          c,
+		readCh:        make(chan []byte, 64),
+		flowControl:   c.flowControl,
+		initialWindow: c.initialWindow,
 	}
 	c.channels[id] = ch
 
@@ -319,6 +361,9 @@ type Channel struct {
 
 	closeOnce sync.Once // specifically for closing readCh
 	abortOnce sync.Once // specifically for sending FlagClose and aborting
+
+	flowControl   bool
+	initialWindow uint32
 }
 
 // Read implements io.Reader.

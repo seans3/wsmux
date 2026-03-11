@@ -20,8 +20,7 @@ import (
 
 func TestMultiplex_IOInterfaces(t *testing.T) {
 	upgrader := Upgrader{
-		websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		0, 0,
+		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
 	serverConnCh := make(chan *Conn, 1)
