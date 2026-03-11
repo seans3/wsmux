@@ -1,4 +1,4 @@
-# wsmux
+# wsmux <!-- v0.9.0 -->
 
 **wsmux** multiplexes independent logical streams over a single WebSocket connection — giving you TCP-like channels with `io.Reader`/`io.Writer` semantics, window-based flow control, and EOF half-close, without managing multiple connections.
 
