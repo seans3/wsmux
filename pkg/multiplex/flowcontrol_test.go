@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex/internal/protocol"
 )
 
 // newFlowControlPair creates a connected client/server pair with flow control enabled
@@ -88,5 +90,114 @@ func TestFlowControl_GateOn_BasicTransfer(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for message at server")
+	}
+}
+
+// TestFlowControl_EgressBlocks verifies that WriteMessage blocks when the send
+// window is exhausted and unblocks exactly when a WindowUpdate is received.
+func TestFlowControl_EgressBlocks(t *testing.T) {
+	const window = 128
+
+	clientConn, serverConn, cleanup := newFlowControlPair(t, window)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	var serverCh *Channel
+	select {
+	case serverCh = <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+	_ = serverCh // server side exists; we won't read from it to keep window exhausted
+
+	// First write (100 bytes) fits within the 128-byte window — must not block.
+	first := make([]byte, 100)
+	if err := clientCh.WriteMessage(first); err != nil {
+		t.Fatalf("first WriteMessage failed: %v", err)
+	}
+
+	// Second write (100 bytes) would exceed the remaining 28-byte window.
+	// It must block. Verify it hasn't returned after a short delay.
+	var writeErr atomic.Value
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		err := clientCh.WriteMessage(make([]byte, 100))
+		if err != nil {
+			writeErr.Store(err)
+		}
+	}()
+
+	select {
+	case <-writeDone:
+		t.Fatal("second WriteMessage returned before window was granted — expected it to block")
+	case <-time.After(100 * time.Millisecond):
+		// Good: write is still blocked.
+	}
+
+	// Send a WindowUpdate from the server side to grant more credit.
+	frame := protocol.EncodeWindowUpdate(clientCh.GetChannelID(), 256)
+	serverConn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}
+
+	// The blocked write must now complete promptly.
+	select {
+	case <-writeDone:
+		if v := writeErr.Load(); v != nil {
+			t.Fatalf("second WriteMessage returned error: %v", v)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second WriteMessage did not unblock after WindowUpdate")
+	}
+}
+
+// TestFlowControl_EgressUnblocksOnConnClose verifies that a write blocked on the
+// send window returns an error when the connection is closed.
+func TestFlowControl_EgressUnblocksOnConnClose(t *testing.T) {
+	const window = 64
+
+	clientConn, serverConn, cleanup := newFlowControlPair(t, window)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	select {
+	case <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	// Exhaust the window.
+	if err := clientCh.WriteMessage(make([]byte, window)); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+
+	// Start a write that will block on the exhausted window.
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- clientCh.WriteMessage(make([]byte, 1))
+	}()
+
+	select {
+	case <-writeDone:
+		t.Fatal("WriteMessage returned before connection was closed")
+	case <-time.After(50 * time.Millisecond):
+		// Good: still blocked.
+	}
+
+	// Close the connection; the blocked write must unblock with an error.
+	clientConn.Close()
+
+	select {
+	case err := <-writeDone:
+		if err == nil {
+			t.Fatal("expected an error after connection close, got nil")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("WriteMessage did not unblock after connection close")
 	}
 }

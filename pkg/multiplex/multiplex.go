@@ -256,6 +256,14 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 			ch.markRemoteClosed()
 		case protocol.FlagClose:
 			ch.abort()
+		case protocol.FlagWindowUpdate:
+			increment, err := protocol.DecodeWindowUpdate(f.Payload)
+			if err != nil || increment == 0 {
+				// Malformed or zero-increment window update is a protocol violation.
+				c.Close()
+				return
+			}
+			ch.addSendWindow(increment)
 		}
 		return
 	}
@@ -263,13 +271,7 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 	// Channel doesn't exist. Check if it's a create request.
 	if f.Flag == protocol.FlagCreate {
 		// New inbound channel
-		newCh := &Channel{
-			id:            f.ChannelID,
-			conn:          c,
-			readCh:        make(chan []byte, 64),
-			flowControl:   c.flowControl,
-			initialWindow: c.initialWindow,
-		}
+		newCh := newChannel(f.ChannelID, c)
 		c.mu.Lock()
 		c.channels[f.ChannelID] = newCh
 		handler := c.onChannelCreated
@@ -295,6 +297,12 @@ func (c *Conn) Close() error {
 		}
 		// Close done to stop ping loop and signal write loop to drain
 		close(c.done)
+		// Wake all writers that may be blocked on send window.
+		c.mu.RLock()
+		for _, ch := range c.channels {
+			ch.sendCond.Broadcast()
+		}
+		c.mu.RUnlock()
 	})
 	return nil
 }
@@ -328,13 +336,7 @@ func (c *Conn) CreateChannel(id uint64) (*Channel, error) {
 		return nil, ErrChannelIDInUse
 	}
 
-	ch := &Channel{
-		id:            id,
-		conn:          c,
-		readCh:        make(chan []byte, 64),
-		flowControl:   c.flowControl,
-		initialWindow: c.initialWindow,
-	}
+	ch := newChannel(id, c)
 	c.channels[id] = ch
 
 	// Notify peer of channel creation
@@ -364,6 +366,27 @@ type Channel struct {
 
 	flowControl   bool
 	initialWindow uint32
+
+	// Egress flow control: sendWindow tracks how many bytes we may still send.
+	// Writes block on sendCond when sendWindow is exhausted.
+	sendMu     sync.Mutex
+	sendCond   *sync.Cond
+	sendWindow int64
+}
+
+func newChannel(id uint64, c *Conn) *Channel {
+	ch := &Channel{
+		id:            id,
+		conn:          c,
+		readCh:        make(chan []byte, 64),
+		flowControl:   c.flowControl,
+		initialWindow: c.initialWindow,
+	}
+	ch.sendCond = sync.NewCond(&ch.sendMu)
+	if c.flowControl {
+		ch.sendWindow = int64(c.initialWindow)
+	}
+	return ch
 }
 
 // Read implements io.Reader.
@@ -400,6 +423,15 @@ func (ch *Channel) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// addSendWindow increases the egress send window by n bytes and wakes any
+// blocked writers. Called when a FlagWindowUpdate frame is received from the peer.
+func (ch *Channel) addSendWindow(n uint32) {
+	ch.sendMu.Lock()
+	ch.sendWindow += int64(n)
+	ch.sendMu.Unlock()
+	ch.sendCond.Broadcast()
+}
+
 // WriteMessage sends a message over the logical channel.
 func (ch *Channel) WriteMessage(data []byte) error {
 	ch.mu.Lock()
@@ -413,6 +445,23 @@ func (ch *Channel) WriteMessage(data []byte) error {
 	case <-ch.conn.done:
 		return io.ErrClosedPipe
 	default:
+	}
+
+	// Egress flow control: block until there is enough send window.
+	if ch.flowControl {
+		ch.sendMu.Lock()
+		for ch.sendWindow < int64(len(data)) {
+			// Check if the connection was closed while we were waiting.
+			select {
+			case <-ch.conn.done:
+				ch.sendMu.Unlock()
+				return io.ErrClosedPipe
+			default:
+			}
+			ch.sendCond.Wait()
+		}
+		ch.sendWindow -= int64(len(data))
+		ch.sendMu.Unlock()
 	}
 
 	f := &protocol.Frame{
@@ -490,6 +539,8 @@ func (ch *Channel) abort() {
 	ch.remoteClosed = true
 	ch.mu.Unlock()
 
+	// Wake any writer blocked on the send window so it can observe the closed state.
+	ch.sendCond.Broadcast()
 	ch.closeReadChannel()
 	ch.conn.removeChannel(ch.id)
 }
