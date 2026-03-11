@@ -6,7 +6,7 @@
 // This file contains tests for protocol violations and malformed input.
 // It ensures that the multiplexer is resilient against buggy or malicious
 // peers and does not panic when receiving unexpected data.
-package multiplex
+package integration
 
 import (
 	"net/http"
@@ -16,17 +16,23 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex/internal/protocol"
+	"github.com/seans3/websockets/pkg/multiplex"
+)
+
+// Wire-format flag constants mirroring the internal protocol package.
+const (
+	flagData   byte = 0x01
+	flagCreate byte = 0x02
 )
 
 func TestMultiplex_MalformedInput(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	serverConnCh := make(chan *Conn, 1)
+	serverConnCh := make(chan *multiplex.Conn, 1)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -38,7 +44,7 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 
-	// We'll use a raw gorilla websocket to send "illegal" frames
+	// Use a raw gorilla websocket to send "illegal" frames directly.
 	ws, _, err := websocket.DefaultDialer.Dial(u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,18 +55,11 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	defer serverConn.Close()
 
 	t.Run("Unrecognized Flag", func(t *testing.T) {
-		// Send a frame with an invalid flag (e.g., 0xFF)
-		f := &protocol.Frame{
-			ChannelID: 1,
-			Flag:      0xFF,
-			Payload:   []byte("garbage"),
-		}
-		err := ws.WriteMessage(websocket.BinaryMessage, f.Encode())
+		err := ws.WriteMessage(websocket.BinaryMessage,
+			encodeFrame(1, 0xFF, []byte("garbage")))
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		// Connection should remain alive (not panic)
 		select {
 		case <-serverConn.Done():
 			t.Error("Server connection closed after unrecognized flag")
@@ -70,17 +69,11 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	})
 
 	t.Run("Data for non-existent channel", func(t *testing.T) {
-		f := &protocol.Frame{
-			ChannelID: 9999, // Never created
-			Flag:      protocol.FlagData,
-			Payload:   []byte("where am I going?"),
-		}
-		err := ws.WriteMessage(websocket.BinaryMessage, f.Encode())
+		err := ws.WriteMessage(websocket.BinaryMessage,
+			encodeFrame(9999, flagData, []byte("where am I going?")))
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		// Should be silently ignored, connection remains alive
 		select {
 		case <-serverConn.Done():
 			t.Error("Server connection closed after data for missing channel")
@@ -90,18 +83,10 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	})
 
 	t.Run("Duplicate Create", func(t *testing.T) {
-		// First create normally
-		id := uint64(123)
-		f1 := &protocol.Frame{ChannelID: id, Flag: protocol.FlagCreate}
-		_ = ws.WriteMessage(websocket.BinaryMessage, f1.Encode())
-
-		// Wait for it to be registered
+		frame := encodeFrame(123, flagCreate, nil)
+		_ = ws.WriteMessage(websocket.BinaryMessage, frame)
 		time.Sleep(50 * time.Millisecond)
-
-		// Send create again for same ID
-		_ = ws.WriteMessage(websocket.BinaryMessage, f1.Encode())
-
-		// Should not panic, just ignore or handle gracefully
+		_ = ws.WriteMessage(websocket.BinaryMessage, frame)
 		select {
 		case <-serverConn.Done():
 			t.Error("Server connection closed after duplicate create")
@@ -111,14 +96,12 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	})
 
 	t.Run("Invalid Varint", func(t *testing.T) {
-		// Send 11 bytes with MSB set (invalid varint)
+		// 11 bytes with MSB set — not a valid varint.
 		invalidData := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80}
 		err := ws.WriteMessage(websocket.BinaryMessage, invalidData)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		// handleFrame should log/ignore, connection should stay alive
 		select {
 		case <-serverConn.Done():
 			t.Error("Server connection closed after invalid varint")
@@ -128,12 +111,10 @@ func TestMultiplex_MalformedInput(t *testing.T) {
 	})
 
 	t.Run("Frame too short", func(t *testing.T) {
-		// Only 1 byte (might be interpreted as partial ID, but not enough for flag)
 		err := ws.WriteMessage(websocket.BinaryMessage, []byte{0x01})
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		select {
 		case <-serverConn.Done():
 			t.Error("Server connection closed after short frame")

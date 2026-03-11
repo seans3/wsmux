@@ -6,7 +6,7 @@
 // This file contains tests to verify fairness between logical channels.
 // It ensures that a high-bandwidth "flooder" channel does not completely
 // starve a low-latency "interactive" channel on the same connection.
-package multiplex
+package integration
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 )
 
 func TestMultiplex_Fairness(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -36,7 +37,7 @@ func TestMultiplex_Fairness(t *testing.T) {
 		if err != nil {
 			return
 		}
-		c.SetChannelCreatedHandler(func(ch *Channel) error {
+		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			go func() {
 				id := ch.GetChannelID()
 				for {
@@ -45,11 +46,8 @@ func TestMultiplex_Fairness(t *testing.T) {
 						return
 					}
 					if id == floodChannelID {
-						// The flood channel is just drained to keep the
-						// connection's readLoop moving.
 						continue
 					}
-					// Echo other channels (like the "ping" channel)
 					_ = ch.WriteMessage(msg)
 				}
 			}()
@@ -60,7 +58,7 @@ func TestMultiplex_Fairness(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +68,6 @@ func TestMultiplex_Fairness(t *testing.T) {
 	floodCh, _ := clientConn.CreateChannel(floodChannelID)
 	pingCh, _ := clientConn.CreateChannel(pingChannelID)
 
-	// Start a "flooder" that tries to saturate the connection
 	floodDone := make(chan struct{})
 	go func() {
 		defer close(floodDone)
@@ -84,19 +81,15 @@ func TestMultiplex_Fairness(t *testing.T) {
 				if err := floodCh.WriteMessage(data); err != nil {
 					return
 				}
-				// We don't read back on floodCh to avoid blocking
-				// on the server side (due to HoL blocking in enqueueRead).
 			}
 		}
 	}()
 
-	// Measure "ping" latency while the flooder is running
 	successCount := 0
 	pingIterations := 20
 	for i := 0; i < pingIterations; i++ {
 		start := time.Now()
-		err := pingCh.WriteMessage([]byte("ping"))
-		if err != nil {
+		if err := pingCh.WriteMessage([]byte("ping")); err != nil {
 			t.Errorf("Ping write error: %v", err)
 			break
 		}
@@ -105,7 +98,7 @@ func TestMultiplex_Fairness(t *testing.T) {
 		msgCh := readMessageAsync(pingCh)
 		select {
 		case <-ctx.Done():
-			t.Logf("Ping %d timed out (flooder might be saturating buffer)", i)
+			t.Logf("Ping %d timed out", i)
 		case _, ok := <-msgCh:
 			if ok {
 				successCount++
@@ -120,9 +113,6 @@ func TestMultiplex_Fairness(t *testing.T) {
 
 	t.Logf("Fairness results: %d/%d pings succeeded during flood", successCount, pingIterations)
 
-	// In a fair system, we expect most pings to get through eventually,
-	// even if the flood channel is aggressive.
-	// If the shared writeCh is full, both will block equally.
 	if successCount < (pingIterations / 2) {
 		t.Errorf("Low-latency channel was starved: only %d/%d pings succeeded", successCount, pingIterations)
 	}

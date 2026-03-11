@@ -5,7 +5,7 @@
 
 // This file contains tests to verify Head-of-Line (HoL) blocking behavior with
 // and without per-channel flow control enabled.
-package multiplex
+package integration
 
 import (
 	"context"
@@ -16,12 +16,13 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // runHoLTest creates a server that floods two channels and measures how many
 // messages the fast reader accumulates in 2 seconds while the slow reader
 // stops after slowReadLimit messages. It returns the fast reader's count.
-func runHoLTest(t *testing.T, upgrader Upgrader, dialer Dialer, slowReadLimit int) int {
+func runHoLTest(t *testing.T, upgrader multiplex.Upgrader, dialer multiplex.Dialer, slowReadLimit int) int {
 	t.Helper()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +30,7 @@ func runHoLTest(t *testing.T, upgrader Upgrader, dialer Dialer, slowReadLimit in
 		if err != nil {
 			return
 		}
-		c.SetChannelCreatedHandler(func(ch *Channel) error {
+		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			go func() {
 				data := make([]byte, 1024)
 				for {
@@ -87,16 +88,14 @@ func runHoLTest(t *testing.T, upgrader Upgrader, dialer Dialer, slowReadLimit in
 // when flow control is disabled. A slow reader on one channel must stall the
 // fast reader on another channel on the same connection.
 func TestVerification_HoLBlocking_GateOff(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 
 	count := runHoLTest(t, upgrader, dialer, 100)
 	t.Logf("Fast reader count (gate off): %d", count)
 
-	// With HoL blocking present the fast reader stalls once readCh fills up.
-	// 500 is a safe upper bound for the blocked case over localhost.
 	if count > 500 {
 		t.Errorf("fast reader was NOT blocked (count=%d); HoL blocking may be gone with gate off", count)
 	} else {
@@ -108,11 +107,11 @@ func TestVerification_HoLBlocking_GateOff(t *testing.T) {
 // when flow control is enabled. The fast reader must not be stalled by a slow
 // reader on a different channel.
 func TestVerification_HoLBlocking_GateOn(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader:          websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		EnableFlowControl: true,
 	}
-	dialer := Dialer{
+	dialer := multiplex.Dialer{
 		Dialer:            websocket.Dialer{},
 		EnableFlowControl: true,
 	}
@@ -120,8 +119,6 @@ func TestVerification_HoLBlocking_GateOn(t *testing.T) {
 	count := runHoLTest(t, upgrader, dialer, 100)
 	t.Logf("Fast reader count (gate on): %d", count)
 
-	// With HoL blocking eliminated the fast reader should accumulate far more
-	// than 500 messages over 2 seconds against a localhost server.
 	if count <= 500 {
 		t.Errorf("fast reader was unexpectedly stalled (count=%d); HoL blocking still present with gate on", count)
 	} else {
