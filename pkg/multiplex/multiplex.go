@@ -269,6 +269,7 @@ func (c *Conn) readLoop() {
 
 		frame, err := protocol.Decode(data)
 		if err != nil {
+			c.logger.Warn("frame decode failure", "err", err)
 			continue
 		}
 
@@ -316,11 +317,21 @@ func (c *Conn) handleFrame(f *protocol.Frame) {
 			}
 			ch.logger.Debug("WindowUpdate received", "increment", increment)
 			ch.addSendWindow(increment)
+		case protocol.FlagCreate:
+			c.logger.Warn("protocol violation: duplicate FlagCreate for existing channel", "channel_id", f.ChannelID)
+		default:
+			c.logger.Warn("unrecognized frame flag", "channel_id", f.ChannelID, "flag", f.Flag)
 		}
 		return
 	}
 
-	// Channel doesn't exist. Check if it's a create request.
+	// Channel doesn't exist.
+	if f.Flag != protocol.FlagCreate {
+		c.logger.Warn("frame for unknown channel", "channel_id", f.ChannelID, "flag", f.Flag)
+		return
+	}
+
+	// Check if it's a create request.
 	if f.Flag == protocol.FlagCreate {
 		// New inbound channel
 		newCh := newChannel(f.ChannelID, c)
