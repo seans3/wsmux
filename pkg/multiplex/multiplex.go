@@ -199,6 +199,13 @@ func newConnInternal(ws *websocket.Conn, cfg connConfig) *Conn {
 		return nil
 	})
 
+	c.logger.Info("connection established",
+		"flow_control", cfg.flowControl,
+		"initial_window", cfg.initialWindow,
+		"ping_interval", cfg.pingInterval,
+		"read_timeout", cfg.readTimeout,
+	)
+
 	go c.writeLoop()
 	go c.readLoop()
 	go c.pingLoop()
@@ -225,6 +232,7 @@ func (c *Conn) writeLoop() {
 			}
 			_ = c.ws.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 			if err := c.ws.WriteMessage(msg.messageType, msg.data); err != nil {
+				c.logger.Error("write error", "err", err)
 				return
 			}
 		case <-c.done:
@@ -244,9 +252,11 @@ func (c *Conn) writeLoop() {
 
 func (c *Conn) readLoop() {
 	defer c.Close()
+	defer c.logger.Info("connection closed")
 	for {
 		messageType, data, err := c.ws.ReadMessage()
 		if err != nil {
+			c.logger.Warn("read error", "err", err)
 			return
 		}
 
