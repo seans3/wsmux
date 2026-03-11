@@ -463,13 +463,33 @@ func (ch *Channel) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-// Write implements io.Writer.
+// Write implements io.Writer. With flow control enabled, large writes are
+// chunked to at most initialWindow bytes to avoid deadlock: a write larger
+// than the window blocks forever because the peer can only send credits after
+// reading data we haven't sent yet.
 func (ch *Channel) Write(p []byte) (n int, err error) {
-	err = ch.WriteMessage(p)
-	if err != nil {
-		return 0, err
+	if !ch.flowControl {
+		if err = ch.WriteMessage(p); err != nil {
+			return 0, err
+		}
+		return len(p), nil
 	}
-	return len(p), nil
+	chunkSize := int(ch.initialWindow)
+	if chunkSize == 0 {
+		chunkSize = int(defaultInitialWindow)
+	}
+	for len(p) > 0 {
+		end := chunkSize
+		if end > len(p) {
+			end = len(p)
+		}
+		if err = ch.WriteMessage(p[:end]); err != nil {
+			return n, err
+		}
+		n += end
+		p = p[end:]
+	}
+	return n, nil
 }
 
 // addSendWindow increases the egress send window by n bytes and wakes any
