@@ -12,11 +12,15 @@ build:
 	go build -o bin/ws-client cmd/client/ws-client.go
 	go build -o bin/ws-rexec-server cmd/ws-rexec-server/main.go
 	go build -o bin/ws-rexec-client cmd/ws-rexec-client/main.go
+	go build -o bin/ws-file-server cmd/ws-file-server/main.go
+	go build -o bin/ws-file-client cmd/ws-file-client/main.go
 
 .PHONY: build-rexec
 build-rexec:
 	go build -o bin/ws-rexec-server cmd/ws-rexec-server/main.go
 	go build -o bin/ws-rexec-client cmd/ws-rexec-client/main.go
+	go build -o bin/ws-file-server cmd/ws-file-server/main.go
+	go build -o bin/ws-file-client cmd/ws-file-client/main.go
 
 .PHONY: install
 install:

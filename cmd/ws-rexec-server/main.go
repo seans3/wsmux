@@ -17,7 +17,9 @@ import (
 )
 
 var (
-	addr = flag.String("addr", "localhost:8080", "http service address")
+	addr          = flag.String("addr", "localhost:8080", "http service address")
+	flowControl   = flag.Bool("flow-control", false, "enable per-channel flow control")
+	initialWindow = flag.Uint("window", 0, "flow control initial window in bytes (0 = default 64KB)")
 )
 
 const (
@@ -38,9 +40,9 @@ func main() {
 
 func handleRexec(w http.ResponseWriter, r *http.Request) {
 	upgrader := multiplex.Upgrader{
-		Upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		},
+		Upgrader:          websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		EnableFlowControl: *flowControl,
+		InitialWindow:     uint32(*initialWindow),
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
