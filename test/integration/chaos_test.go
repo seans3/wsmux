@@ -4,10 +4,9 @@
 //go:build long
 
 // This file contains "chaos" tests that use a fault-injected network
-
 // connection to simulate network instability, drops, and latency,
 // ensuring the multiplexer can handle ungraceful disconnects.
-package multiplex
+package integration
 
 import (
 	"bytes"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // FaultInjectedConn wraps a net.Conn to simulate network issues.
@@ -42,8 +42,6 @@ func NewFaultInjectedConn(c net.Conn, dropRate float64) *FaultInjectedConn {
 
 func (c *FaultInjectedConn) Write(b []byte) (n int, err error) {
 	if c.r.Float64() < c.dropRate {
-		// Simulate a "successful" write from the perspective of the caller,
-		// but the data is lost in the "network".
 		return len(b), nil
 	}
 	return c.Conn.Write(b)
@@ -58,11 +56,11 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
-	serverConnCh := make(chan *Conn, 1)
+	serverConnCh := make(chan *multiplex.Conn, 1)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -73,7 +71,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -86,16 +84,15 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 	const msgsPerChannel = 20
 	var wg sync.WaitGroup
 
-	serverConn.SetChannelCreatedHandler(func(ch *Channel) error {
+	serverConn.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 		wg.Add(1)
-		go func(c *Channel) {
+		go func(c *multiplex.Channel) {
 			defer wg.Done()
 			for {
 				msg, err := c.ReadMessage()
 				if err != nil {
 					return
 				}
-				// Echo back
 				_ = c.WriteMessage(msg)
 			}
 		}(ch)
@@ -117,9 +114,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 					return
 				}
 
-				// Use a deadline for reading to avoid hanging forever on lost messages
 				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-
 				readDone := make(chan struct{})
 				var resp []byte
 				var readErr error
@@ -136,8 +131,6 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 					}
 				case <-ctx.Done():
 					cancel()
-					// In a real chaos test, we'd expect some failures,
-					// but here we are just stress testing the concurrency.
 				}
 			}
 			_ = ch.Close()
@@ -148,7 +141,7 @@ func TestMultiplex_ChaosStress(t *testing.T) {
 }
 
 func TestMultiplex_ActualChaos(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
@@ -158,7 +151,7 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 			return
 		}
 		defer c.Close()
-		c.SetChannelCreatedHandler(func(ch *Channel) error {
+		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			for {
 				msg, err := ch.ReadMessage()
 				if err != nil {
@@ -167,17 +160,13 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 				_ = ch.WriteMessage(msg)
 			}
 		})
-		// Keep server connection alive until test finishes
 		time.Sleep(1 * time.Second)
 	}))
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 
-	// Inject 10% packet drop at the TCP level
-	dialer := ChaosDialer{
-		DropRate: 0.10,
-	}
+	dialer := ChaosDialer{DropRate: 0.10}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +178,6 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Try to send 20 messages. Some will likely fail or timeout.
 	successCount := 0
 	for i := 0; i < 20; i++ {
 		data := []byte("chaos-msg")
@@ -208,11 +196,9 @@ func TestMultiplex_ActualChaos(t *testing.T) {
 				successCount++
 			}
 		case <-ctx.Done():
-			// Timeout expected due to chaos
 		}
 		cancel()
 	}
 
 	t.Logf("Chaos test finished. Successes: %d/20", successCount)
-	// The goal is NOT 100% success, but ZERO panics.
 }

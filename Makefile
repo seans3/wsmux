@@ -52,7 +52,7 @@ test:
 
 .PHONY: test-long
 test-long:
-	go test -v -race -tags=long ./pkg/multiplex/...
+	go test -v -race -tags=long ./pkg/multiplex/... ./test/integration/...
 
 .PHONY: test-e2e
 test-e2e:
@@ -60,7 +60,7 @@ test-e2e:
 
 .PHONY: test-stress
 test-stress:
-	go test -v -race -timeout 5m -tags=stress ./pkg/multiplex/...
+	go test -v -race -timeout 5m -tags=stress ./test/integration/...
 
 .PHONY: test-all
 test-all: test test-long test-stress test-e2e

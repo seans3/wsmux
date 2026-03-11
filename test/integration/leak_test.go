@@ -6,7 +6,7 @@
 // This file contains resource leak analysis tests. It ensures that goroutines
 // and other resources are correctly reclaimed after connections and logical
 // channels are closed, preventing memory exhaustion in long-running processes.
-package multiplex
+package integration
 
 import (
 	"context"
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // TestLeak_Goroutines ensures that creating and closing many connections
@@ -27,7 +28,7 @@ func TestLeak_Goroutines(t *testing.T) {
 	runtime.GC()
 	initialGoroutines := runtime.NumGoroutine()
 
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -38,9 +39,8 @@ func TestLeak_Goroutines(t *testing.T) {
 		if err != nil {
 			return
 		}
-		c.SetChannelCreatedHandler(func(ch *Channel) error {
+		c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 			go func() {
-				// Simple interaction
 				msg, _ := ch.ReadMessage()
 				_ = ch.WriteMessage(msg)
 				_ = ch.Close()
@@ -52,7 +52,7 @@ func TestLeak_Goroutines(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 
 	const iterations = 50
 	const channelsPerConn = 10
@@ -76,17 +76,13 @@ func TestLeak_Goroutines(t *testing.T) {
 
 		_ = clientConn.Close()
 		cancel()
-		// Small sleep to allow goroutines to exit
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Wait for cleanup
 	time.Sleep(500 * time.Millisecond)
 	runtime.GC()
 	finalGoroutines := runtime.NumGoroutine()
 
-	// We allow a small threshold for background runtime goroutines
-	// but generally it should be close to initial.
 	if finalGoroutines > initialGoroutines+10 {
 		t.Errorf("Potential goroutine leak: started with %d, ended with %d", initialGoroutines, finalGoroutines)
 	}

@@ -9,7 +9,7 @@
 //
 // Every test runs twice: once without flow control and once with flow control
 // enabled (default 64KB window), so regressions in either mode are caught.
-package multiplex
+package integration
 
 import (
 	"bytes"
@@ -25,13 +25,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // stressCase parameterises a stress test with and without flow control.
 type stressCase struct {
 	name    string
-	upgrade Upgrader
-	dial    Dialer
+	upgrade multiplex.Upgrader
+	dial    multiplex.Dialer
 }
 
 func stressCases() []stressCase {
@@ -39,13 +40,13 @@ func stressCases() []stressCase {
 	return []stressCase{
 		{
 			name:    "NoFlowControl",
-			upgrade: Upgrader{Upgrader: base},
-			dial:    Dialer{Dialer: websocket.Dialer{}},
+			upgrade: multiplex.Upgrader{Upgrader: base},
+			dial:    multiplex.Dialer{Dialer: websocket.Dialer{}},
 		},
 		{
 			name:    "FlowControl",
-			upgrade: Upgrader{Upgrader: base, EnableFlowControl: true},
-			dial:    Dialer{Dialer: websocket.Dialer{}, EnableFlowControl: true},
+			upgrade: multiplex.Upgrader{Upgrader: base, EnableFlowControl: true},
+			dial:    multiplex.Dialer{Dialer: websocket.Dialer{}, EnableFlowControl: true},
 		},
 	}
 }
@@ -59,13 +60,13 @@ func stressCases() []stressCase {
 func TestStress_Echo(t *testing.T) {
 	for _, tc := range stressCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			serverConnCh := make(chan *Conn, 1)
+			serverConnCh := make(chan *multiplex.Conn, 1)
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				c, err := tc.upgrade.Upgrade(w, r, nil)
 				if err != nil {
 					return
 				}
-				c.SetChannelCreatedHandler(func(ch *Channel) error {
+				c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 					go func() {
 						_, _ = io.Copy(ch, ch)
 						_ = ch.CloseWrite()
@@ -159,7 +160,7 @@ func TestStress_Echo(t *testing.T) {
 func TestStress_CrossChannel(t *testing.T) {
 	for _, tc := range stressCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			serverConnCh := make(chan *Conn, 1)
+			serverConnCh := make(chan *multiplex.Conn, 1)
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				c, err := tc.upgrade.Upgrade(w, r, nil)
 				if err != nil {
@@ -167,9 +168,9 @@ func TestStress_CrossChannel(t *testing.T) {
 				}
 
 				var mu sync.Mutex
-				channels := make(map[uint64]*Channel)
+				channels := make(map[uint64]*multiplex.Channel)
 
-				c.SetChannelCreatedHandler(func(ch *Channel) error {
+				c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 					id := ch.GetChannelID()
 					mu.Lock()
 					channels[id] = ch
@@ -266,7 +267,7 @@ func TestStress_CrossChannel(t *testing.T) {
 }
 
 // relay reads from one channel and writes to another, then propagates EOF.
-func relay(in, out *Channel) {
+func relay(in, out *multiplex.Channel) {
 	_, _ = io.Copy(out, in)
 	_ = out.CloseWrite()
 }
@@ -282,7 +283,7 @@ func TestStress_RapidLifecycle(t *testing.T) {
 				if err != nil {
 					return
 				}
-				c.SetChannelCreatedHandler(func(ch *Channel) error {
+				c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 					return ch.Close()
 				})
 				<-c.Done()
@@ -327,7 +328,7 @@ func TestStress_ParallelConns(t *testing.T) {
 				if err != nil {
 					return
 				}
-				c.SetChannelCreatedHandler(func(ch *Channel) error {
+				c.SetChannelCreatedHandler(func(ch *multiplex.Channel) error {
 					go func() {
 						_, _ = io.Copy(ch, ch)
 						_ = ch.CloseWrite()

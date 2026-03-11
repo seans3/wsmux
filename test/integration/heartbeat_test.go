@@ -4,10 +4,9 @@
 //go:build long
 
 // This file contains tests for the WebSocket heartbeat mechanism (Ping/Pong)
-
 // and read/write deadlines, ensuring that stale or broken connections are
 // detected and closed.
-package multiplex
+package integration
 
 import (
 	"context"
@@ -18,11 +17,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 func TestMultiplex_ReadTimeout(t *testing.T) {
-	// Setup a test server that doesn't send anything
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
@@ -32,17 +31,15 @@ func TestMultiplex_ReadTimeout(t *testing.T) {
 			return
 		}
 		defer c.Close()
-		// Just sit here and wait
 		<-c.Done()
 	}))
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 
-	// Dial with a very short read timeout and NO pings
-	dialer := Dialer{
+	dialer := multiplex.Dialer{
 		Dialer:       websocket.Dialer{},
-		PingInterval: 10 * time.Hour, // Effectively no pings
+		PingInterval: 10 * time.Hour,
 		ReadTimeout:  100 * time.Millisecond,
 	}
 
@@ -52,7 +49,6 @@ func TestMultiplex_ReadTimeout(t *testing.T) {
 	}
 	defer clientConn.Close()
 
-	// Wait for timeout
 	start := time.Now()
 	<-clientConn.Done()
 	duration := time.Since(start)
@@ -63,8 +59,7 @@ func TestMultiplex_ReadTimeout(t *testing.T) {
 }
 
 func TestMultiplex_Heartbeat(t *testing.T) {
-	// Setup a test server that handles pings
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}
 
@@ -80,8 +75,7 @@ func TestMultiplex_Heartbeat(t *testing.T) {
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
 
-	// Dial with short read timeout and EVEN SHORTER ping interval
-	dialer := Dialer{
+	dialer := multiplex.Dialer{
 		Dialer:       websocket.Dialer{},
 		PingInterval: 50 * time.Millisecond,
 		ReadTimeout:  200 * time.Millisecond,
@@ -93,7 +87,6 @@ func TestMultiplex_Heartbeat(t *testing.T) {
 	}
 	defer clientConn.Close()
 
-	// Wait for 500ms. If the connection is still alive, heartbeats are working.
 	select {
 	case <-clientConn.Done():
 		t.Fatal("Connection timed out despite heartbeats")

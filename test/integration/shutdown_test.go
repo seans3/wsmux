@@ -5,7 +5,7 @@
 
 // This file contains tests for connection shutdown scenarios, including
 // graceful WebSocket closure and abrupt TCP-level disconnects.
-package multiplex
+package integration
 
 import (
 	"context"
@@ -17,18 +17,19 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // TestShutdown_Graceful verifies that calling Conn.Close() triggers a
 // proper WebSocket Close handshake and terminates the connection cleanly.
 func TestShutdown_Graceful(t *testing.T) {
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	serverConnCh := make(chan *Conn, 1)
+	serverConnCh := make(chan *multiplex.Conn, 1)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -39,35 +40,31 @@ func TestShutdown_Graceful(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	serverConn := <-serverConnCh
 
-	// Close from client side
 	if err := clientConn.Close(); err != nil {
 		t.Errorf("Client Close failed: %v", err)
 	}
 
-	// Verify both sides finish
 	select {
 	case <-clientConn.Done():
-		// Success
 	case <-time.After(2 * time.Second):
 		t.Error("Timed out waiting for client Conn.Done")
 	}
 
 	select {
 	case <-serverConn.Done():
-		// Success
 	case <-time.After(2 * time.Second):
 		t.Error("Timed out waiting for server Conn.Done")
 	}
 }
 
-// connIntercept is a net.Listener that lets us capture the server-side net.Conn
+// connIntercept is a net.Listener that captures the server-side net.Conn.
 type connIntercept struct {
 	net.Listener
 	captured chan net.Conn
@@ -81,9 +78,8 @@ func (l *connIntercept) Accept() (net.Conn, error) {
 	return c, err
 }
 
-// TestShutdown_Abrupt verifies that the library correctly handles
-// sudden network-level disconnects (e.g., TCP reset) and returns
-// appropriate errors to active readers/writers.
+// TestShutdown_Abrupt verifies that the library correctly handles sudden
+// network-level disconnects and returns appropriate errors to active readers.
 func TestShutdown_Abrupt(t *testing.T) {
 	captured := make(chan net.Conn, 1)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -91,18 +87,15 @@ func TestShutdown_Abrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	intercept := &connIntercept{
-		Listener: ln,
-		captured: captured,
-	}
+	intercept := &connIntercept{Listener: ln, captured: captured}
 
-	upgrader := Upgrader{
+	upgrader := multiplex.Upgrader{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	serverConnCh := make(chan *Conn, 1)
+	serverConnCh := make(chan *multiplex.Conn, 1)
 	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -115,21 +108,19 @@ func TestShutdown_Abrupt(t *testing.T) {
 	defer s.Close()
 
 	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	dialer := Dialer{Dialer: websocket.Dialer{}}
+	dialer := multiplex.Dialer{Dialer: websocket.Dialer{}}
 	clientConn, _, err := dialer.Dial(context.Background(), u, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clientConn.Close()
 
-	// Wait for the server-side multiplex.Conn to be ready
 	select {
 	case <-serverConnCh:
 	case <-time.After(time.Second):
 		t.Fatal("Timeout waiting for server multiplex.Conn")
 	}
 
-	// Capture the raw TCP connection on the server side
 	var rawServerConn net.Conn
 	select {
 	case rawServerConn = <-captured:
@@ -137,16 +128,13 @@ func TestShutdown_Abrupt(t *testing.T) {
 		t.Fatal("Timeout waiting for raw server connection")
 	}
 
-	// Create an active channel
 	ch, err := clientConn.CreateChannel(1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Kill the TCP connection abruptly from the server side without a Close frame
 	rawServerConn.Close()
 
-	// Active reading should fail with an error, not hang
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := ch.ReadMessage()
@@ -162,10 +150,8 @@ func TestShutdown_Abrupt(t *testing.T) {
 		t.Error("ReadMessage hung after abrupt shutdown")
 	}
 
-	// Conn.Done should still trigger eventually (via readLoop failing)
 	select {
 	case <-clientConn.Done():
-		// Success
 	case <-time.After(5 * time.Second):
 		t.Error("clientConn.Done did not trigger after abrupt shutdown")
 	}

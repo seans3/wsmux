@@ -4,25 +4,25 @@
 //go:build long
 
 // This file implements a FaultInjectedConn and associated dialer to
-
 // simulate network-level failures for chaos testing.
-package multiplex
+package integration
 
 import (
 	"context"
 	"net"
 	"net/http"
+
+	"github.com/seans3/websockets/pkg/multiplex"
 )
 
 // ChaosDialer is a test helper that dials using the FaultInjectedConn.
 // It allows us to simulate low-level TCP issues while using the high-level WebSocket API.
 type ChaosDialer struct {
-	Dialer
+	multiplex.Dialer
 	DropRate float64
 }
 
-func (d *ChaosDialer) Dial(ctx context.Context, url string, requestHeader http.Header) (*Conn, *http.Response, error) {
-	// Custom NetDial for the underlying gorilla dialer
+func (d *ChaosDialer) Dial(ctx context.Context, url string, requestHeader http.Header) (*multiplex.Conn, *http.Response, error) {
 	d.Dialer.Dialer.NetDial = func(network, addr string) (net.Conn, error) {
 		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 		if err != nil {
