@@ -262,6 +262,104 @@ func TestFlowControl_ContinuousStream(t *testing.T) {
 	}
 }
 
+// TestFlowControl_ZeroIncrementWindow verifies that a WindowUpdate frame with a
+// zero increment is treated as a protocol violation and closes the connection.
+func TestFlowControl_ZeroIncrementWindow(t *testing.T) {
+	clientConn, serverConn, cleanup := newFlowControlPair(t, 0)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	select {
+	case <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	// Send a zero-increment WindowUpdate from the server to the client.
+	// The client's handleFrame should close the connection on receipt.
+	frame := protocol.EncodeWindowUpdate(clientCh.GetChannelID(), 0)
+	serverConn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}
+
+	// The client connection must close promptly.
+	select {
+	case <-clientConn.Done():
+		// Good: connection was terminated.
+	case <-time.After(time.Second):
+		t.Fatal("client connection did not close after zero-increment WindowUpdate")
+	}
+}
+
+// TestFlowControl_UnknownChannelWindowUpdate verifies that a WindowUpdate for a
+// non-existent channel is silently ignored and the connection continues normally.
+func TestFlowControl_UnknownChannelWindowUpdate(t *testing.T) {
+	clientConn, serverConn, cleanup := newFlowControlPair(t, 0)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	var serverCh *Channel
+	select {
+	case serverCh = <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	// Send a WindowUpdate for channel ID 9999, which doesn't exist.
+	frame := protocol.EncodeWindowUpdate(9999, 1024)
+	serverConn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}
+
+	// Give it a moment to be processed.
+	time.Sleep(50 * time.Millisecond)
+
+	// The connection must still be alive: a normal message exchange should work.
+	want := []byte("still alive")
+	if err := clientCh.WriteMessage(want); err != nil {
+		t.Fatalf("WriteMessage after unknown WindowUpdate: %v", err)
+	}
+	select {
+	case got := <-readMessageAsync(serverCh):
+		if !bytes.Equal(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout reading message after unknown-channel WindowUpdate")
+	}
+}
+
+// TestFlowControl_OverflowWindow verifies that repeatedly granting large window
+// increments does not cause sendWindow to wrap negative, which would deadlock writers.
+func TestFlowControl_OverflowWindow(t *testing.T) {
+	clientConn, serverConn, cleanup := newFlowControlPair(t, 0)
+	defer cleanup()
+
+	clientCh, err := clientConn.CreateChannel(1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	select {
+	case <-waitForChannel(serverConn):
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server channel")
+	}
+
+	// Grant an enormous window increment several times.
+	for i := 0; i < 5; i++ {
+		frame := protocol.EncodeWindowUpdate(clientCh.GetChannelID(), ^uint32(0)) // math.MaxUint32
+		serverConn.writeCh <- writeMsg{messageType: websocket.BinaryMessage, data: frame.Encode()}
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// sendWindow must be positive (not wrapped negative). Verify by writing successfully.
+	if err := clientCh.WriteMessage([]byte("post-overflow write")); err != nil {
+		t.Fatalf("WriteMessage failed after large window grants: %v", err)
+	}
+}
+
 // TestFlowControl_EgressUnblocksOnConnClose verifies that a write blocked on the
 // send window returns an error when the connection is closed.
 func TestFlowControl_EgressUnblocksOnConnClose(t *testing.T) {
