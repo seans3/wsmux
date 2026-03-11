@@ -1,4 +1,4 @@
-module github.com/seans3/websockets
+module github.com/seans3/wsmux
 
 go 1.21
 

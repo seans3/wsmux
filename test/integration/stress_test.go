@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 // stressCase parameterises a stress test with and without flow control.

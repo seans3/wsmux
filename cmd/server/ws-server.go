@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 var addr = flag.String("addr", "localhost:8080", "address/port of websocket server")

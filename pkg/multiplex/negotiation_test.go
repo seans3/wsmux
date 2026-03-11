@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex/internal/protocol"
+	"github.com/seans3/wsmux/pkg/multiplex/internal/protocol"
 )
 
 // TestNegotiation_Mismatch verifies behavior when the server does not

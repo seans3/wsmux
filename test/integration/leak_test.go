@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 // TestLeak_Goroutines ensures that creating and closing many connections

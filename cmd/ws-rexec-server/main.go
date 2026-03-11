@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 var (

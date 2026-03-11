@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/seans3/websockets/pkg/multiplex/internal/protocol"
+	"github.com/seans3/wsmux/pkg/multiplex/internal/protocol"
 )
 
 func TestMultiplex_Handshake(t *testing.T) {

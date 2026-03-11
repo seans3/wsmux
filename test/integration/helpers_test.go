@@ -7,7 +7,7 @@
 package integration
 
 import (
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 // readMessageAsync calls ReadMessage on ch in a goroutine and returns a channel

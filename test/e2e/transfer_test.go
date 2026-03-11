@@ -43,8 +43,8 @@ func TestMain(m *testing.M) {
 	wsFileClient = filepath.Join(tmpDir, "ws-file-client")
 
 	for pkg, out := range map[string]string{
-		"github.com/seans3/websockets/cmd/ws-file-server": wsFileServer,
-		"github.com/seans3/websockets/cmd/ws-file-client": wsFileClient,
+		"github.com/seans3/wsmux/cmd/ws-file-server": wsFileServer,
+		"github.com/seans3/wsmux/cmd/ws-file-client": wsFileClient,
 	} {
 		if out, err := exec.Command("go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build %s: %v\n%s\n", pkg, err, out)

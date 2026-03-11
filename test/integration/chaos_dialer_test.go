@@ -12,7 +12,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/seans3/websockets/pkg/multiplex"
+	"github.com/seans3/wsmux/pkg/multiplex"
 )
 
 // ChaosDialer is a test helper that dials using the FaultInjectedConn.
