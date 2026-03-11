@@ -86,6 +86,25 @@ To ensure high code quality and maintainability, all contributions must adhere t
     - [x] Demonstrates `CloseWrite()` signaling EOF to a remote shell (e.g. `bash`).
     - [x] Uses `io.Copy` for idiomatic data piping.
 
+### Milestone 8: Structured Leveled Logging
+- [x] **Design:** Silent-by-default via `*slog.Logger` field on `Upgrader`/`Dialer`. Nil logger routes to a no-op discard handler with zero overhead.
+- [x] **Step 1 — Connection-level (INFO):** `"connection established"` (with config attrs) and `"connection closed"` emitted by `newConnInternal` and `readLoop`.
+- [x] **Step 2 — Write/read errors (ERROR/WARN):** `"write error"` in `writeLoop`; `"read error"` in `readLoop`.
+- [x] **Step 3 — Channel lifecycle (DEBUG):** `"channel created (outbound/inbound)"`, `"EOF sent (CloseWrite)"`, `"EOF received"`, `"channel aborted"`, `"channel fully closed"`.
+- [x] **Step 4 — Flow control events (DEBUG/WARN):** `"send window exhausted, blocking"`, `"WindowUpdate sent"`, `"WindowUpdate received"`, `"read buffer overflow"` (WARN).
+- [x] **Step 5 — Protocol/frame errors (WARN):** `"frame decode failure"`, `"frame for unknown channel"`, `"duplicate FlagCreate"`, `"unrecognized frame flag"`, `"protocol violation: malformed or zero-increment WindowUpdate"`.
+- [x] **Step 6 — Tests:** `TestLogging_*` suite verifying nil safety, INFO events, DEBUG channel lifecycle, and inbound channel detection. Uses thread-safe `syncBuffer` to avoid data races when reading log output.
+- [x] All log records pre-annotated with `remote_addr`; channel-scoped records also include `channel_id`.
+
+### Milestone 9: Code Quality & Hardening
+*Identified and resolved during comprehensive project review.*
+- [x] **Dead-code fix:** Removed unreachable `if f.Flag == protocol.FlagCreate` branch in `handleFrame` introduced when the early-return guard was added.
+- [x] **Handler error visibility:** `onChannelCreated` errors now logged at WARN before closing the channel, instead of being silently discarded.
+- [x] **Send window overflow guard:** `addSendWindow` now checks for `int64` overflow before incrementing; closes the connection as a protocol violation (per RFC 7540 §6.9.1).
+- [x] **Remove orphaned constructors:** `NewConn` and `NewConnWithConfig` removed — they bypassed subprotocol negotiation, carried no logger, and were untested.
+- [x] **DoS protection — `MaxChannels`:** Added `MaxChannels uint32` to `Upgrader` and `Dialer`. Inbound `FlagCreate` frames that exceed the limit close the connection; outbound `CreateChannel` calls return `ErrTooManyChannels`. Zero means unlimited (default). Tested with `TestMultiplex_MaxChannels`.
+- [x] **Error wrapping:** `Upgrade` and `Dial` errors wrapped with `fmt.Errorf("multiplex: upgrade/dial: %w", err)` for actionable caller context.
+
 ---
 
 ## Technical Considerations
@@ -105,6 +124,15 @@ To ensure high code quality and maintainability, all contributions must adhere t
 **Decision:** Each `Channel` has an internal `chan []byte` buffer. `ReadMessage` pulls from this.
 
 ### 4. EOF vs Close
-**Decision:** 
+**Decision:**
 - `CloseWrite()`: Locally done writing. Sends `FlagEOF`. Read still open.
 - `Close()`: Immediate abort. Sends `FlagClose`. Both directions closed.
+
+### 5. Flow Control Window Overflow
+**Decision:** Per RFC 7540 §6.9.1, if a received `WindowUpdate` would cause `sendWindow` to exceed `math.MaxInt64`, the connection is closed as a protocol violation. `int64` provides a 9.2 EB ceiling that is unreachable in practice, but the check ensures correctness.
+
+### 6. Channel Limit
+**Decision:** `MaxChannels` defaults to 0 (unlimited) for backwards compatibility. Any deployment accepting connections from untrusted peers should set an explicit limit to prevent channel-exhaustion DoS. The inbound limit closes the connection; the outbound limit returns `ErrTooManyChannels` to the caller.
+
+### 7. Logging
+**Decision:** Silent by default — `Logger: nil` routes to a `slog.NewTextHandler(io.Discard, nil)` no-op, imposing zero runtime cost. Callers opt in by supplying a `*slog.Logger`. This keeps the library usable in environments with no logging infrastructure without any configuration burden.
