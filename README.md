@@ -120,12 +120,39 @@ conn, resp, err := dialer.Dial(ctx, url, requestHeader)
 
 ## Testing & Verification
 
-The project includes three distinct test suites:
-1. **Unit Tests:** Fast verification of core logic (`make test`).
-2. **Long Tests:** Resource leak analysis, chaos testing, and stability checks (`make test-long`).
-3. **Stress Tests:** High-load concurrency and data integrity validation (`make test-stress`).
+The project has four test suites organized by scope and execution time:
 
-To run the full suite:
+### 1. Unit Tests (`make test`)
+Fast verification of core logic — framing, channel lifecycle, flow control mechanics, protocol edge cases. Runs with the race detector. No build tag required.
+```bash
+make test
+```
+
+### 2. Integration Tests (`make test-long`, `make test-stress`)
+Located in `test/integration/`. These tests exercise the full public API against a real in-process WebSocket server.
+
+- **Long tests** (`//go:build long`): Resource leak detection, chaos/fault-injection testing, heartbeat and read-timeout behaviour, graceful and abrupt shutdown, Head-of-Line blocking verification (with and without flow control), channel fairness under flood conditions, and malformed-frame resilience.
+- **Stress tests** (`//go:build stress`): High-load concurrency across 20+ channels, cross-channel relay, rapid channel open/close cycles, and multiple parallel connections. Every stress test runs twice — once without flow control and once with — to catch regressions in both modes.
+
+```bash
+make test-long    # runs pkg/multiplex and test/integration (long tag)
+make test-stress  # runs test/integration (stress tag)
+```
+
+### 3. End-to-End Tests (`make test-e2e`)
+Located in `test/e2e/`. These tests compile and run the `ws-file-server` and `ws-file-client` binaries as real OS processes, transfer a 10 MB random file over a live WebSocket connection, and verify the received bytes are identical to what was sent. Three scenarios are covered:
+
+| Test | Flow Control | Window | Window Cycles |
+|---|---|---|---|
+| `NoFlowControl` | off | — | — |
+| `FlowControlDefaultWindow` | on | 64 KB (default) | ~160 |
+| `FlowControl4KWindow` | on | 4 KB | ~2,560 |
+
+```bash
+make test-e2e
+```
+
+### Run everything
 ```bash
 make test-all
 ```
